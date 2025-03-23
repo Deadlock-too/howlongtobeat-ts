@@ -1,0 +1,47 @@
+{
+  "name": "howlongtobeat-ts",
+  "version": "1.0.0",
+  "description": "TypeScript library to extrapolate data from HowLongToBeat.com search results.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "howlongtobeat",
+    "games",
+    "api",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test-coverage": "jest --coverage",
+    "prepare": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Deadlock-too",
+  "license": "ISC",
+  "type": "module",
+  "homepage": "https://github.com/Deadlock-too/howlongtobeat-ts#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Deadlock-too/howlongtobeat-ts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Deadlock-too/howlongtobeat-ts/issues"
+  },
+  "dependencies": {
+    "user-agents": "^1.1.481"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/user-agents": "^1.0.4",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}
