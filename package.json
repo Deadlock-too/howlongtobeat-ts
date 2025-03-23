@@ -23,7 +23,7 @@
     "access": "public"
   },
   "author": "Deadlock-too",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "homepage": "https://github.com/Deadlock-too/howlongtobeat-ts#readme",
   "repository": {
