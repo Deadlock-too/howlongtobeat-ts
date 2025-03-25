@@ -1,7 +1,7 @@
 # howlongtobeat-ts
-![GitHub](https://img.shields.io/github/license/Deadlock-too/howlongtobeat-ts)
-![npm](https://img.shields.io/npm/v/howlongtobeat-ts)
-![npm](https://img.shields.io/npm/dt/howlongtobeat-ts)
+[![GitHub](https://img.shields.io/github/license/Deadlock-too/howlongtobeat-ts)](https://github.com/Deadlock-too/howlongtobeat-ts)
+[![npm](https://img.shields.io/npm/v/howlongtobeat-ts)](https://www.npmjs.com/package/howlongtobeat-ts)
+[![npm](https://img.shields.io/npm/dt/howlongtobeat-ts)](https://www.npmjs.com/package/howlongtobeat-ts)
 
 A TypeScript library for interacting with the HowLongToBeat website API. Easily search for games and retrieve estimates on how long it takes to complete them.
 
