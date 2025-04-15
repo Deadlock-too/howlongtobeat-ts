@@ -28,6 +28,7 @@ describe('HowLongToBeatService', () => {
     expect(headers).toHaveProperty('Content-Type', 'application/json')
     expect(headers).toHaveProperty('Accept', '*/*')
     expect(headers).toHaveProperty('Referer', HowLongToBeatService.REFERER_HEADER)
+    expect(Object.keys(headers).length).toBe(4)
   })
 
   test('getSearchRequestData should return valid payload', () => {
@@ -135,7 +136,7 @@ describe('HowLongToBeatService', () => {
   })
 })
 
-describe('JSONResultParser', () => {
+describe('parser', () => {
   const data: HowLongToBeatJsonResult = {
     color: 'blue',
     title: 'Test Game',

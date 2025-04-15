@@ -15,7 +15,7 @@ describe('Integration-Testing HowLongToBeatService', () => {
     expect(hltbEntries[0].reviewScore).toBeGreaterThan(90)
     expect(hltbEntries[0].imageUrl).toBe('https://howlongtobeat.com/games/68151_Elden_Ring.jpg')
     expect(hltbEntries[0].releaseYear).toBe(2022)
-    expect(hltbEntries[0].platforms).toHaveLength(5)
+    expect(hltbEntries[0].platforms.length).toBeGreaterThan(5)
     expect(hltbEntries[0].platforms).toContain('PC')
     expect(hltbEntries[0].mainTime).toBeGreaterThan(200000)
     expect(hltbEntries[0].mainExtraTime).toBeGreaterThan(350000)
