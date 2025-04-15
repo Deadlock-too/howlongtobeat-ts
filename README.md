@@ -125,7 +125,7 @@ npm test
 ```
 
 ## Issues, Questions & Discussions
-If you found a bug, report it as soo as possible creating an [issue](https://github.com/Deadlock-too/howlongtobeat-ts/issues/new), the code is not perfect for sure, and I will be happy to fix it.
+If you found a bug, report it as soon as possible creating an [issue](https://github.com/Deadlock-too/howlongtobeat-ts/issues/new), the code is not perfect for sure, and I will be happy to fix it.
 If you need any new feature, or want to discuss the current implementation/features, consider opening a [discussion](https://github.com/Deadlock-too/howlongtobeat-ts/discussions/) or even propose a change with a [Pull Request](https://github.com/Deadlock-too/howlongtobeat-ts/pulls).
 
 ## License
