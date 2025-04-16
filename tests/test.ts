@@ -4,7 +4,7 @@ import { getSimilarity } from '../src/lib/utils'
 import { parseJsonResult } from '../src/lib/parser'
 
 describe('HowLongToBeatService', () => {
-  let howLongToBeatService: HowLongToBeatService;
+  let howLongToBeatService: HowLongToBeatService
 
   beforeEach(() => {
     // Reset static props
@@ -64,8 +64,8 @@ describe('HowLongToBeatService', () => {
 
     HowLongToBeatService.sendWebRequest = jest.fn().mockResolvedValue(JSON.stringify(mockValue))
 
-    const result = await howLongToBeatService.search('Test Game');
-    expect(result).toHaveLength(1);
+    const result = await howLongToBeatService.search('Test Game')
+    expect(result).toHaveLength(1)
     expect(result).toBeInstanceOf(Array<HowLongToBeatEntry>)
     expect(result![0].name).toBe(mockValue.data[0].game_name)
   })
@@ -76,8 +76,8 @@ describe('HowLongToBeatService', () => {
       return Promise.resolve('Invalid JSON')
     })
 
-    const result = await howLongToBeatService.search('Test Game');
-    expect(result).toHaveLength(0);
+    const result = await howLongToBeatService.search('Test Game')
+    expect(result).toHaveLength(0)
 
     consoleSpy.mockRestore()
     hltbsSpy.mockRestore()
@@ -89,23 +89,23 @@ describe('HowLongToBeatService', () => {
       return Promise.resolve(undefined)
     })
 
-    const result = await howLongToBeatService.search('Test Game');
-    expect(result).toHaveLength(0);
+    const result = await howLongToBeatService.search('Test Game')
+    expect(result).toHaveLength(0)
 
     consoleSpy.mockRestore()
     hltbsSpy.mockRestore()
   })
 
   test('search should use different modifiers correctly', async () => {
-    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.ONLY_DLC, 1, null);
-    const parsedPayload = JSON.parse(payload);
-    expect(parsedPayload.searchOptions.games).toHaveProperty('modifier', SearchModifier.ONLY_DLC);
+    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.ONLY_DLC, 1, null)
+    const parsedPayload = JSON.parse(payload)
+    expect(parsedPayload.searchOptions.games).toHaveProperty('modifier', SearchModifier.ONLY_DLC)
   })
 
   test('search should handle pagination correctly', async () => {
-    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.NONE, 2, null);
-    const parsedPayload = JSON.parse(payload);
-    expect(parsedPayload).toHaveProperty('searchPage', 2);
+    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.NONE, 2, null)
+    const parsedPayload = JSON.parse(payload)
+    expect(parsedPayload).toHaveProperty('searchPage', 2)
   })
 
   test('sendWebRequest should handle network errors gracefully', async () => {
@@ -359,31 +359,55 @@ describe('parser', () => {
   })
 
   test('should handle empty data array', () => {
-    const emptyData = { ...data, data: [] };
-    const jsonResult = JSON.stringify(emptyData);
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5);
-    expect(parsingResult).toHaveLength(0);
+    const emptyData = { ...data, data: [] }
+    const jsonResult = JSON.stringify(emptyData)
+    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
+    expect(parsingResult).toHaveLength(0)
   })
 
   test('should handle missing required fields', () => {
     const incompleteData = {
       ...data,
-      data: [{ game_id: 1, game_name: 'Test Game' }]
-    };
-    const jsonResult = JSON.stringify(incompleteData);
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5);
-    expect(parsingResult).toHaveLength(1);
-    expect(parsingResult[0].id).toBe(1);
-    expect(parsingResult[0].name).toBe('Test Game');
+      data: [ { game_id: 1, game_name: 'Test Game' } ]
+    }
+    const jsonResult = JSON.stringify(incompleteData)
+    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
+    expect(parsingResult).toHaveLength(1)
+    expect(parsingResult[0].id).toBe(1)
+    expect(parsingResult[0].name).toBe('Test Game')
   })
 
   test('should order results by similarity', () => {
     const jsonResult = JSON.stringify({
       ...data,
       data: [
-        { game_id: 1, game_name: 'Test Game', game_alias: 'Alias', game_type: 'game', review_score: 80, profile_platform: 'PC, PS4', release_world: 2023 },
-        { game_id: 2, game_name: 'Another Game', game_alias: 'Another Alias', game_type: 'game', review_score: 70, profile_platform: 'PC', release_world: 2022 },
-        { game_id: 3, game_name: 'Test Game 2', game_alias: 'Alias 2', game_type: 'game', review_score: 90, profile_platform: 'PS4', release_world: 2021 }
+        {
+          game_id: 1,
+          game_name: 'Test Game',
+          game_alias: 'Alias',
+          game_type: 'game',
+          review_score: 80,
+          profile_platform: 'PC, PS4',
+          release_world: 2023
+        },
+        {
+          game_id: 2,
+          game_name: 'Another Game',
+          game_alias: 'Another Alias',
+          game_type: 'game',
+          review_score: 70,
+          profile_platform: 'PC',
+          release_world: 2022
+        },
+        {
+          game_id: 3,
+          game_name: 'Test Game 2',
+          game_alias: 'Alias 2',
+          game_type: 'game',
+          review_score: 90,
+          profile_platform: 'PS4',
+          release_world: 2021
+        }
       ]
     })
 
@@ -412,15 +436,15 @@ describe('utils', () => {
   })
 
   test('getSimilarity should handle empty strings', () => {
-    const result1 = getSimilarity('', '');
-    const result2 = getSimilarity('test', '');
-    expect(result1).toBe(1); // Two empty strings are identical
-    expect(result2).toBe(0); // No similarity between text and empty string
+    const result1 = getSimilarity('', '')
+    const result2 = getSimilarity('test', '')
+    expect(result1).toBe(1)
+    expect(result2).toBe(0)
   })
 
   test('getSimilarity should be case insensitive', () => {
-    const result = getSimilarity('Test', 'test');
-    expect(result).toBe(1); // Or whatever behavior is expected for case sensitivity
+    const result = getSimilarity('Test', 'test')
+    expect(result).toBe(1)
   })
 
   test('getSimilarity should compute Elden Ring and Elden Rin correctly', () => {
