@@ -9,7 +9,7 @@ describe('HowLongToBeatService', () => {
   beforeEach(() => {
     // Reset static props
     HowLongToBeatService.BASE_URL = 'https://howlongtobeat.com'
-    HowLongToBeatService.SEARCH_URL = HowLongToBeatService.BASE_URL + 'api/s/'
+    HowLongToBeatService.SEARCH_URL = HowLongToBeatService.BASE_URL + 'api/search/'
     HowLongToBeatService.REFERER_HEADER = HowLongToBeatService.BASE_URL
 
     jest.resetAllMocks()
@@ -23,17 +23,19 @@ describe('HowLongToBeatService', () => {
   })
 
   test('getSearchRequestHeaders should return correct headers', () => {
-    const headers = HowLongToBeatService.getSearchRequestHeaders()
+    const authToken = "test-auth-token"
+    const headers = HowLongToBeatService.getSearchRequestHeaders(authToken)
     expect(headers).toHaveProperty('User-Agent')
     expect(headers).toHaveProperty('Content-Type', 'application/json')
     expect(headers).toHaveProperty('Accept', '*/*')
     expect(headers).toHaveProperty('Referer', HowLongToBeatService.REFERER_HEADER)
-    expect(Object.keys(headers).length).toBe(4)
+    expect(headers).toHaveProperty('x-auth-token', authToken)
+    expect(Object.keys(headers).length).toBe(5)
   })
 
   test('getSearchRequestData should return valid payload', () => {
     const searchKey = 'Test Game'
-    const payload = HowLongToBeatService.getSearchRequestData(searchKey, SearchModifier.NONE, 1, null)
+    const payload = HowLongToBeatService.getSearchRequestData(searchKey, SearchModifier.NONE, 1)
     const parsedPayload = JSON.parse(payload)
     expect(parsedPayload).toHaveProperty('searchTerms', searchKey.split(' '))
     expect(parsedPayload).toHaveProperty('searchType', 'games')
@@ -97,13 +99,13 @@ describe('HowLongToBeatService', () => {
   })
 
   test('search should use different modifiers correctly', async () => {
-    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.ONLY_DLC, 1, null)
+    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.ONLY_DLC, 1)
     const parsedPayload = JSON.parse(payload)
     expect(parsedPayload.searchOptions.games).toHaveProperty('modifier', SearchModifier.ONLY_DLC)
   })
 
   test('search should handle pagination correctly', async () => {
-    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.NONE, 2, null)
+    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.NONE, 2)
     const parsedPayload = JSON.parse(payload)
     expect(parsedPayload).toHaveProperty('searchPage', 2)
   })
