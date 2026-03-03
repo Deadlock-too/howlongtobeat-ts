@@ -7,7 +7,7 @@ export class HowLongToBeatService {
 
   static BASE_URL = 'https://howlongtobeat.com/'
   static REFERER_HEADER = HowLongToBeatService.BASE_URL
-  static SEARCH_URL = HowLongToBeatService.BASE_URL + 'api/search'
+  static SEARCH_URL = HowLongToBeatService.BASE_URL + 'api/finder'
 
   constructor(minSimilarity: number = 0.5) {
     this.minSimilarity = minSimilarity
