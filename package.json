@@ -1,6 +1,6 @@
 {
   "name": "howlongtobeat-ts",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "TypeScript library to extrapolate data from HowLongToBeat.com search results.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
