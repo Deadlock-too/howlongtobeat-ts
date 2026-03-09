@@ -84,8 +84,8 @@ An interface representing a game entry returned from the HowLongToBeat API.
 - `name`: The name of the game.
 - `mainTime`: The average time to complete the main story.
 - `mainCount`: The number of users who reported the main story completion time.
-- `mainExtrasTime`: The average time to complete the main story plus extras.
-- `mainExtrasCount`: The number of users who reported the main story plus extras completion time.
+- `mainExtraTime`: The average time to complete the main story plus extras.
+- `mainExtraCount`: The number of users who reported the main story plus extras completion time.
 - `completionistTime`: The average time to complete the game 100%.
 - `completionistCount`: The number of users who reported the 100% completion time.
 - `allStylesTime`: The average time to complete the game in all styles.
@@ -94,7 +94,7 @@ An interface representing a game entry returned from the HowLongToBeat API.
 - `coopCount`: The number of users who reported the co-op completion time.
 - `multiplayerTime`: The average time to complete the game in multiplayer mode.
 - `multiplayerCount`: The number of users who reported the multiplayer completion time.
-- `image`: The URL of the game's image.
+- `imageUrl`: The URL of the game's image.
 - `reviewScore`: The review score of the game on HowLongToBeat.
 - `platforms`: An array of platforms the game is available on.
 - `similarity`: The similarity score of the game to the search query.
