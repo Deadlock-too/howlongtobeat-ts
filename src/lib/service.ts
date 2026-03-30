@@ -2,7 +2,7 @@ import { parseJsonResult } from './parser'
 import { SearchModifier } from './types'
 import UserAgent from 'user-agents'
 
-type InitResponse = {
+export type InitResponse = {
   token: string,
   hpKey: string,
   hpVal: string,

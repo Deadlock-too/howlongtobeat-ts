@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from '@jest/globals'
 import { type HowLongToBeatEntry, HowLongToBeatService, SearchModifier, HowLongToBeatJsonResult } from '../src'
+import { type InitResponse } from '../src/lib/service'
 import { getSimilarity } from '../src/lib/utils'
 import { parseJsonResult } from '../src/lib/parser'
 
@@ -23,19 +24,30 @@ describe('HowLongToBeatService', () => {
   })
 
   test('getSearchRequestHeaders should return correct headers', () => {
-    const authToken = "test-auth-token"
-    const headers = HowLongToBeatService.getSearchRequestHeaders(authToken)
+    const initResponse = {
+      token: 'test-token',
+      hpKey: 'test-hp-key',
+      hpVal: 'test-hp-val'
+    } as InitResponse
+    const headers = HowLongToBeatService.getSearchRequestHeaders(initResponse)
     expect(headers).toHaveProperty('User-Agent')
     expect(headers).toHaveProperty('Content-Type', 'application/json')
     expect(headers).toHaveProperty('Accept', '*/*')
     expect(headers).toHaveProperty('Referer', HowLongToBeatService.REFERER_HEADER)
-    expect(headers).toHaveProperty('x-auth-token', authToken)
-    expect(Object.keys(headers).length).toBe(5)
+    expect(headers).toHaveProperty('X-Auth-Token', initResponse.token)
+    expect(headers).toHaveProperty('X-Hp-Key', initResponse.hpKey)
+    expect(headers).toHaveProperty('X-Hp-Val', initResponse.hpVal)
+    expect(Object.keys(headers).length).toBe(7)
   })
 
   test('getSearchRequestData should return valid payload', () => {
     const searchKey = 'Test Game'
-    const payload = HowLongToBeatService.getSearchRequestData(searchKey, SearchModifier.NONE, 1)
+    const initResponse = {
+      token: 'test-token',
+      hpKey: 'test-hp-key',
+      hpVal: 'test-hp-val'
+    } as InitResponse
+    const payload = HowLongToBeatService.getSearchRequestData(searchKey, SearchModifier.NONE, 1, initResponse)
     const parsedPayload = JSON.parse(payload)
     expect(parsedPayload).toHaveProperty('searchTerms', searchKey.split(' '))
     expect(parsedPayload).toHaveProperty('searchType', 'games')
@@ -99,13 +111,23 @@ describe('HowLongToBeatService', () => {
   })
 
   test('search should use different modifiers correctly', async () => {
-    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.ONLY_DLC, 1)
+    const initResponse = {
+      token: 'test-token',
+      hpKey: 'test-hp-key',
+      hpVal: 'test-hp-val'
+    } as InitResponse
+    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.ONLY_DLC, 1, initResponse)
     const parsedPayload = JSON.parse(payload)
     expect(parsedPayload.searchOptions.games).toHaveProperty('modifier', SearchModifier.ONLY_DLC)
   })
 
   test('search should handle pagination correctly', async () => {
-    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.NONE, 2)
+    const initResponse = {
+      token: 'test-token',
+      hpKey: 'test-hp-key',
+      hpVal: 'test-hp-val'
+    } as InitResponse
+    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.NONE, 2, initResponse)
     const parsedPayload = JSON.parse(payload)
     expect(parsedPayload).toHaveProperty('searchPage', 2)
   })
