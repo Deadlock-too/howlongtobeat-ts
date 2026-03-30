@@ -1,0 +1,31 @@
+name: Tests (every 6 hours)
+
+on:
+  schedule:
+    # Every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Notify on failure (example)
+        if: failure()
+        run: |
+          echo "Workflow failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
