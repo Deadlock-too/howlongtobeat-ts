@@ -54,7 +54,7 @@ describe('HowLongToBeatService', () => {
     expect(parsedPayload).toHaveProperty('searchPage', 1)
   })
 
-  test('search should return null for empty game name', async () => {
+  test('search should return an error result for empty game name', async () => {
     const result = await howLongToBeatService.search('')
     expect(result.success).toBe(false)
     expect(result.error).toBe('Search key is empty')
