@@ -37,8 +37,10 @@ async function searchGame() {
   // Search for a game
   const results = await hltbService.search('The Last of Us');
   
-  if (results) {
-    console.log('Search results:', results);
+  if (results.success) {
+    console.log('Search results:', results.data);
+  } else {
+    console.error('Search failed:', results.error);
   }
 }
 
@@ -47,8 +49,10 @@ async function searchWithModifier() {
   const hltbService = new HowLongToBeatService();
   const results = await hltbService.search('Zelda', SearchModifier.HIDE_DLC);
   
-  if (results) {
-    console.log('Search results:', results);
+  if (results.success) {
+    console.log('Search results:', results.data);
+  } else {
+    console.error('Search failed:', results.error);
   }
 }
 
@@ -68,9 +72,15 @@ The main service class for interacting with the HowLongToBeat website.
 
 #### Methods
 
-- `async search(searchKey: string, searchModifier: SearchModifier = SearchModifier.NONE): Promise<HowLongToBeatEntry[]>`: Searches for games matching the provided search key.
+- `async search(searchKey: string, searchModifier: SearchModifier = SearchModifier.NONE): Promise<SearchResult>`: Searches for games matching the provided search key.
     - `searchKey`: The game title to search for
     - `searchModifier`: Optional search modifier to adjust search behavior that defaults to `SearchModifier.NONE` allowing all results.
+
+### `SearchResult`
+The result object returned by `HowLongToBeatService.search`.
+- `success`: `true` when the request and parsing complete successfully.
+- `error`: Optional error message when `success` is `false`.
+- `data`: Array of `HowLongToBeatEntry` items (empty on failure).
 
 ### `SearchModifier`
 An enum representing different search modifiers that can be used to filter search results.
