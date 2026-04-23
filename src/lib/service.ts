@@ -1,5 +1,5 @@
 import { parseJsonResult } from './parser'
-import { SearchModifier } from './types'
+import { SearchResult, SearchModifier } from './types'
 import UserAgent from 'user-agents'
 
 export type InitResponse = {
@@ -20,17 +20,23 @@ export class HowLongToBeatService {
     this.minSimilarity = minSimilarity
   }
 
-  async search(searchKey: string, searchModifier: SearchModifier = SearchModifier.NONE) {
+  async search(searchKey: string, searchModifier: SearchModifier = SearchModifier.NONE): Promise<SearchResult> {
     if (!searchKey || searchKey.length === 0) {
-      return []
+      return { success: false, error: 'Search key is empty', data: [] }
     }
 
     const htmlResult = await HowLongToBeatService.sendWebRequest(searchKey, searchModifier)
-    if (htmlResult) {
-      return parseJsonResult(htmlResult!, searchKey, this.minSimilarity)
+    if (!htmlResult) {
+      return { success: false, error: 'Failed to obtain search results', data: [] }
     }
 
-    return []
+    try {
+      const data = parseJsonResult(htmlResult, searchKey, this.minSimilarity)
+      return { success: true, data }
+    } catch (error) {
+      console.error('Error parsing search results:', error)
+      return { success: false, error: 'Failed to parse search results', data: [] }
+    }
   }
 
   static async sendWebRequest(searchKey: string, searchModifier: SearchModifier = SearchModifier.NONE, page = 1): Promise<string | undefined> {

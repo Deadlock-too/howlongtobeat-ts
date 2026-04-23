@@ -4,24 +4,19 @@ import { getSimilarity } from './utils'
 const IMAGE_URL_PREFIX = 'https://howlongtobeat.com/games/'
 
 export function parseJsonResult(jsonString: string, searchKey: string, minSimilarity: number): HowLongToBeatEntry[] {
-  try {
-    const parsedData = JSON.parse(jsonString) as HowLongToBeatJsonResult
-    const entries: HowLongToBeatEntry[] = []
+  const parsedData = JSON.parse(jsonString) as HowLongToBeatJsonResult
+  const entries: HowLongToBeatEntry[] = []
 
-    for (const data of parsedData.data) {
-      const entry = mapEntry(data, searchKey)
+  for (const data of parsedData.data) {
+    const entry = mapEntry(data, searchKey)
 
-      if (entry.similarity < minSimilarity) {
-        continue
-      }
-      entries.push(entry)
+    if (entry.similarity < minSimilarity) {
+      continue
     }
-
-    return entries.sort((a, b) => b.similarity - a.similarity)
-  } catch (error) {
-    console.error('Error parsing JSON:', error)
-    return []
+    entries.push(entry)
   }
+
+  return entries.sort((a, b) => b.similarity - a.similarity)
 }
 
 function mapEntry(data: HowLongToBeatResultEntry, searchKey: string): HowLongToBeatEntry {

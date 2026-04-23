@@ -1,3 +1,9 @@
+export type SearchResult = {
+  success: boolean
+  error?: string
+  data: HowLongToBeatEntry[]
+}
+
 export type HowLongToBeatJsonResult = {
   color: string
   title: string

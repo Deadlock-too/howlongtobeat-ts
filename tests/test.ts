@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from '@jest/globals'
-import { type HowLongToBeatEntry, HowLongToBeatService, SearchModifier, HowLongToBeatJsonResult } from '../src'
+import { type HowLongToBeatEntry, HowLongToBeatService, SearchModifier, HowLongToBeatJsonResult, type SearchResult } from '../src'
 import { type InitResponse } from '../src/lib/service'
 import { getSimilarity } from '../src/lib/utils'
 import { parseJsonResult } from '../src/lib/parser'
@@ -56,7 +56,9 @@ describe('HowLongToBeatService', () => {
 
   test('search should return null for empty game name', async () => {
     const result = await howLongToBeatService.search('')
-    expect(result).toHaveLength(0)
+    expect(result.success).toBe(false)
+    expect(result.error).toBe('Search key is empty')
+    expect(result.data).toHaveLength(0)
   })
 
   test('search should return game results', async () => {
@@ -79,9 +81,11 @@ describe('HowLongToBeatService', () => {
     HowLongToBeatService.sendWebRequest = jest.fn().mockResolvedValue(JSON.stringify(mockValue))
 
     const result = await howLongToBeatService.search('Test Game')
-    expect(result).toHaveLength(1)
-    expect(result).toBeInstanceOf(Array<HowLongToBeatEntry>)
-    expect(result![0].name).toBe(mockValue.data[0].game_name)
+    expect(result.success).toBe(true)
+    expect(result.error).toBeUndefined()
+    expect(result.data).toHaveLength(1)
+    expect(result.data).toBeInstanceOf(Array)
+    expect(result.data[0].name).toBe(mockValue.data[0].game_name)
   })
 
   test('search should handle invalid response format', async () => {
@@ -91,7 +95,9 @@ describe('HowLongToBeatService', () => {
     })
 
     const result = await howLongToBeatService.search('Test Game')
-    expect(result).toHaveLength(0)
+    expect(result.success).toBe(false)
+    expect(result.error).toBe('Failed to parse search results')
+    expect(result.data).toHaveLength(0)
 
     consoleSpy.mockRestore()
     hltbsSpy.mockRestore()
@@ -104,7 +110,9 @@ describe('HowLongToBeatService', () => {
     })
 
     const result = await howLongToBeatService.search('Test Game')
-    expect(result).toHaveLength(0)
+    expect(result.success).toBe(false)
+    expect(result.error).toBe('Failed to obtain search results')
+    expect(result.data).toHaveLength(0)
 
     consoleSpy.mockRestore()
     hltbsSpy.mockRestore()
@@ -247,13 +255,8 @@ describe('parser', () => {
   })
 
   test('should handle invalid JSON gracefully', () => {
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation()
-
     const invalidJson = '{ invalid json }'
-    const parsingResult = parseJsonResult(invalidJson, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(0)
-
-    consoleSpy.mockRestore()
+    expect(() => parseJsonResult(invalidJson, 'Test Game', 0.5)).toThrow()
   })
 
   test('should handle comp_lvl_sp being null', () => {
