@@ -14,7 +14,7 @@ export class HowLongToBeatService {
 
   static BASE_URL = 'https://howlongtobeat.com/'
   static REFERER_HEADER = HowLongToBeatService.BASE_URL
-  static SEARCH_URL = HowLongToBeatService.BASE_URL + 'api/find'
+  static SEARCH_URL = HowLongToBeatService.BASE_URL + 'api/bleed'
 
   constructor(minSimilarity: number = 0.5) {
     this.minSimilarity = minSimilarity
@@ -89,7 +89,7 @@ export class HowLongToBeatService {
   static async sendWebsiteRequestGetAuthInfo(): Promise<InitResponse | null> {
     const headers = this.getTitleRequestHeaders()
     try {
-      const response = await fetch(HowLongToBeatService.BASE_URL + `api/find/init?t=${new Date().getTime()}`, {
+      const response = await fetch(HowLongToBeatService.BASE_URL + `api/bleed/init?t=${new Date().getTime()}`, {
         headers: headers,
         signal: AbortSignal.timeout(60000)
       })
