@@ -1,6 +1,5 @@
 import { parseJsonResult } from './parser'
 import { SearchResult, SearchModifier } from './types'
-import UserAgent from 'user-agents'
 
 export type InitResponse = {
   token: string,
@@ -15,6 +14,14 @@ export class HowLongToBeatService {
   static BASE_URL = 'https://howlongtobeat.com/'
   static REFERER_HEADER = HowLongToBeatService.BASE_URL
   static SEARCH_URL = HowLongToBeatService.BASE_URL + 'api/bleed'
+
+  static USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+  ]
 
   constructor(minSimilarity: number = 0.5) {
     this.minSimilarity = minSimilarity
@@ -79,9 +86,9 @@ export class HowLongToBeatService {
   }
 
   static getTitleRequestHeaders() {
-    const userAgent = new UserAgent()
+    const userAgent = HowLongToBeatService.USER_AGENTS[Math.floor(Math.random() * HowLongToBeatService.USER_AGENTS.length)]
     return {
-      'User-Agent': userAgent.toString(),
+      'User-Agent': userAgent,
       'Referer': HowLongToBeatService.REFERER_HEADER,
     }
   }
