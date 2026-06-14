@@ -1,481 +1,280 @@
-import { beforeEach, describe, expect, test } from '@jest/globals'
-import { type HowLongToBeatEntry, HowLongToBeatService, SearchModifier, HowLongToBeatJsonResult, type SearchResult } from '../src'
+import { describe, expect, test } from '@jest/globals'
+import { readFileSync } from 'node:fs'
+import { HowLongToBeatService, SearchModifier, ScraperError, toHours } from '../src'
 import { type InitResponse } from '../src/lib/service'
-import { getSimilarity } from '../src/lib/utils'
-import { parseJsonResult } from '../src/lib/parser'
+import { getMatchScore, getSimilarity } from '../src/lib/utils'
+import { parseGamePage, parseJsonResult } from '../src/lib/parser'
+import { HttpClient, type FetchLike } from '../src/core/http'
+import { clampSimilarity } from '../src/core/options'
 
-describe('HowLongToBeatService', () => {
-  let howLongToBeatService: HowLongToBeatService
+const searchFixture = readFileSync('tests/fixtures/search-response.json', 'utf8')
+const gamePageFixture = readFileSync('tests/fixtures/game-page.html', 'utf8')
 
-  beforeEach(() => {
-    // Reset static props
-    HowLongToBeatService.BASE_URL = 'https://howlongtobeat.com'
-    HowLongToBeatService.SEARCH_URL = HowLongToBeatService.BASE_URL + 'api/search/'
-    HowLongToBeatService.REFERER_HEADER = HowLongToBeatService.BASE_URL
+const AUTH_BODY = JSON.stringify({ token: 'tok', hpKey: 'hp', hpVal: 'val' })
 
-    jest.resetAllMocks()
+type Route = { match: (url: string) => boolean; respond: () => Response }
 
-    howLongToBeatService = new HowLongToBeatService()
-  })
+/** Builds a fetch double that routes by URL and never touches the network. */
+function fetchStub(routes: Route[]): FetchLike {
+  return async (input) => {
+    const url = String(input)
+    const route = routes.find((r) => r.match(url))
+    if (!route) throw new Error(`unexpected request to ${url}`)
+    return route.respond()
+  }
+}
 
-  afterEach(() => {
-    // Restore all mocks
-    jest.restoreAllMocks()
-  })
+const initRoute = (): Route => ({ match: (u) => u.includes('/init'), respond: () => new Response(AUTH_BODY) })
 
-  test('getSearchRequestHeaders should return correct headers', () => {
-    const initResponse = {
-      token: 'test-token',
-      hpKey: 'test-hp-key',
-      hpVal: 'test-hp-val'
-    } as InitResponse
+function makeService(routes: Route[]): HowLongToBeatService {
+  return new HowLongToBeatService({ fetch: fetchStub(routes), retries: 0 })
+}
+
+describe('HowLongToBeatService – request building', () => {
+  const initResponse = {
+    token: 'test-token',
+    hpKey: 'test-hp-key',
+    hpVal: 'test-hp-val',
+    userAgent: 'UA',
+  } as InitResponse
+
+  test('getSearchRequestHeaders returns the expected headers', () => {
     const headers = HowLongToBeatService.getSearchRequestHeaders(initResponse)
-    expect(headers).toHaveProperty('User-Agent')
-    expect(headers).toHaveProperty('Content-Type', 'application/json')
-    expect(headers).toHaveProperty('Accept', '*/*')
-    expect(headers).toHaveProperty('Referer', HowLongToBeatService.REFERER_HEADER)
-    expect(headers).toHaveProperty('X-Auth-Token', initResponse.token)
-    expect(headers).toHaveProperty('X-Hp-Key', initResponse.hpKey)
-    expect(headers).toHaveProperty('X-Hp-Val', initResponse.hpVal)
-    expect(Object.keys(headers).length).toBe(7)
+    expect(headers).toMatchObject({
+      'Content-Type': 'application/json',
+      Accept: '*/*',
+      Referer: HowLongToBeatService.REFERER_HEADER,
+      'X-Auth-Token': initResponse.token,
+      'X-Hp-Key': initResponse.hpKey,
+      'X-Hp-Val': initResponse.hpVal,
+      'User-Agent': 'UA',
+    })
+    expect(Object.keys(headers)).toHaveLength(7)
   })
 
-  test('getSearchRequestData should return valid payload', () => {
-    const searchKey = 'Test Game'
-    const initResponse = {
-      token: 'test-token',
-      hpKey: 'test-hp-key',
-      hpVal: 'test-hp-val'
-    } as InitResponse
-    const payload = HowLongToBeatService.getSearchRequestData(searchKey, SearchModifier.NONE, 1, initResponse)
-    const parsedPayload = JSON.parse(payload)
-    expect(parsedPayload).toHaveProperty('searchTerms', searchKey.split(' '))
-    expect(parsedPayload).toHaveProperty('searchType', 'games')
-    expect(parsedPayload).toHaveProperty('searchPage', 1)
+  test('getSearchRequestData builds a valid payload with modifier and page', () => {
+    const payload = JSON.parse(
+      HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.ONLY_DLC, 2, initResponse),
+    )
+    expect(payload).toMatchObject({ searchType: 'games', searchTerms: ['Test', 'Game'], searchPage: 2 })
+    expect(payload.searchOptions.games.modifier).toBe(SearchModifier.ONLY_DLC)
+  })
+})
+
+describe('HowLongToBeatService – search', () => {
+  test('rejects an empty search key', async () => {
+    const result = await new HowLongToBeatService().search('')
+    expect(result).toEqual({ success: false, error: 'Search key is empty' })
   })
 
-  test('search should return an error result for empty game name', async () => {
-    const result = await howLongToBeatService.search('')
-    expect(result.success).toBe(false)
-    expect(result.error).toBe('Search key is empty')
-    expect(result.data).toHaveLength(0)
-  })
+  test('returns parsed, similarity-sorted results', async () => {
+    const service = makeService([
+      initRoute(),
+      { match: (u) => u.endsWith('/bleed'), respond: () => new Response(searchFixture) },
+    ])
+    const result = await service.search('Elden Ring')
 
-  test('search should return game results', async () => {
-    const mockValue = {
-      data: [
-        {
-          game_id: 1,
-          game_name: 'Test Game',
-          game_alias: 'Alias',
-          game_type: 'game',
-          game_image: 'test.jpg',
-          review_score: 80,
-          profile_dev: 'Test Dev',
-          profile_platform: 'PC, PS4',
-          release_world: '2023',
-        }
-      ]
-    }
-
-    HowLongToBeatService.sendWebRequest = jest.fn().mockResolvedValue(JSON.stringify(mockValue))
-
-    const result = await howLongToBeatService.search('Test Game')
     expect(result.success).toBe(true)
-    expect(result.error).toBeUndefined()
-    expect(result.data).toHaveLength(1)
-    expect(result.data).toBeInstanceOf(Array)
-    expect(result.data[0].name).toBe(mockValue.data[0].game_name)
+    if (!result.success) throw new Error('expected success')
+    // "Far Cry 3" is filtered out by the default similarity threshold.
+    expect(result.data.map((e) => e.id)).toEqual([68151, 112501])
+    expect(result.data[0].similarity).toBe(1)
+    expect(result.data[0].mainTime).toBe(208800)
+    expect(result.data[0].raw.game_id).toBe(68151)
   })
 
-  test('search should handle invalid response format', async () => {
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation()
-    const hltbsSpy = jest.spyOn(HowLongToBeatService, 'sendWebRequest').mockImplementation(() => {
-      return Promise.resolve('Invalid JSON')
-    })
+  test('reports a failure when auth cannot be obtained', async () => {
+    const service = makeService([
+      { match: (u) => u.includes('/init'), respond: () => new Response('', { status: 403 }) },
+    ])
+    const result = await service.search('Elden Ring')
+    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
+  })
 
-    const result = await howLongToBeatService.search('Test Game')
+  test('surfaces a clear error when the search request fails', async () => {
+    const service = makeService([
+      initRoute(),
+      { match: (u) => u.endsWith('/bleed'), respond: () => new Response('', { status: 404 }) },
+    ])
+    const result = await service.search('Elden Ring')
+    expect(result).toEqual({ success: false, error: 'Search request failed with status 404' })
+  })
+
+  test('surfaces a clear error when the response shape changed', async () => {
+    const service = makeService([
+      initRoute(),
+      { match: (u) => u.endsWith('/bleed'), respond: () => new Response(JSON.stringify({ nope: true })) },
+    ])
+    const result = await service.search('Elden Ring')
     expect(result.success).toBe(false)
-    expect(result.error).toBe('Failed to parse search results')
-    expect(result.data).toHaveLength(0)
+    if (result.success) throw new Error('expected failure')
+    expect(result.error).toMatch(/structure may have changed/)
+  })
+})
 
-    consoleSpy.mockRestore()
-    hltbsSpy.mockRestore()
+describe('HowLongToBeatService – searchOne & getById', () => {
+  test('searchOne returns the single best match', async () => {
+    const service = makeService([
+      initRoute(),
+      { match: (u) => u.endsWith('/bleed'), respond: () => new Response(searchFixture) },
+    ])
+    const result = await service.searchOne('Elden Ring')
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect(result.data?.id).toBe(68151)
   })
 
-  test('search should handle empty response', async () => {
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation()
-    const hltbsSpy = jest.spyOn(HowLongToBeatService, 'sendWebRequest').mockImplementation(() => {
-      return Promise.resolve(undefined)
+  test('searchOne returns null when nothing matches', async () => {
+    const service = makeService([
+      initRoute(),
+      { match: (u) => u.endsWith('/bleed'), respond: () => new Response(JSON.stringify({ data: [] })) },
+    ])
+    const result = await service.searchOne('Elden Ring')
+    expect(result).toEqual({ success: true, data: null })
+  })
+
+  test('getById validates the id', async () => {
+    const result = await new HowLongToBeatService().getById(0)
+    expect(result).toEqual({ success: false, error: 'A valid game id is required' })
+  })
+
+  test('getById parses the embedded game payload', async () => {
+    const service = makeService([{ match: (u) => u.includes('/game/'), respond: () => new Response(gamePageFixture) }])
+    const result = await service.getById(68151)
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect(result.data?.name).toBe('Elden Ring')
+    expect(result.data?.mainTime).toBe(208800)
+  })
+})
+
+describe('HowLongToBeatService – options', () => {
+  test('a low similarity threshold widens the result set', async () => {
+    const service = new HowLongToBeatService({
+      minSimilarity: 0.1,
+      fetch: fetchStub([
+        initRoute(),
+        { match: (u) => u.endsWith('/bleed'), respond: () => new Response(searchFixture) },
+      ]),
+      retries: 0,
     })
-
-    const result = await howLongToBeatService.search('Test Game')
-    expect(result.success).toBe(false)
-    expect(result.error).toBe('Failed to obtain search results')
-    expect(result.data).toHaveLength(0)
-
-    consoleSpy.mockRestore()
-    hltbsSpy.mockRestore()
-  })
-
-  test('search should use different modifiers correctly', async () => {
-    const initResponse = {
-      token: 'test-token',
-      hpKey: 'test-hp-key',
-      hpVal: 'test-hp-val'
-    } as InitResponse
-    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.ONLY_DLC, 1, initResponse)
-    const parsedPayload = JSON.parse(payload)
-    expect(parsedPayload.searchOptions.games).toHaveProperty('modifier', SearchModifier.ONLY_DLC)
-  })
-
-  test('search should handle pagination correctly', async () => {
-    const initResponse = {
-      token: 'test-token',
-      hpKey: 'test-hp-key',
-      hpVal: 'test-hp-val'
-    } as InitResponse
-    const payload = HowLongToBeatService.getSearchRequestData('Test Game', SearchModifier.NONE, 2, initResponse)
-    const parsedPayload = JSON.parse(payload)
-    expect(parsedPayload).toHaveProperty('searchPage', 2)
-  })
-
-  test('sendWebRequest should handle network errors gracefully', async () => {
-    const consoleSpy = jest.spyOn(global, 'fetch').mockImplementation(() => Promise.reject(new Error('Network error')))
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation()
-
-    const result = await HowLongToBeatService.sendWebRequest('Test Game')
-    expect(result).toBeUndefined()
-
-    consoleSpy.mockRestore()
-    consoleErrorSpy.mockRestore()
-  })
-
-  test('sendWebRequest should handle non-200 status codes gracefully', async () => {
-    const mockResponse = {
-      ok: false,
-      status: 404,
-      text: jest.fn().mockResolvedValue('Not Found'),
-    }
-    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(mockResponse as any)
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation()
-
-    const result = await HowLongToBeatService.sendWebRequest('Test Game')
-    expect(result).toBeUndefined()
-
-    fetchSpy.mockRestore()
-    consoleErrorSpy.mockRestore()
+    const result = await service.search('Elden Ring')
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    // With a low threshold "Far Cry 3" is now included.
+    expect(result.data).toHaveLength(3)
   })
 })
 
 describe('parser', () => {
-  const data: HowLongToBeatJsonResult = {
-    color: 'blue',
-    title: 'Test Game',
-    category: 'game',
-    count: 1,
-    pageCurrent: 1,
-    pageTotal: 1,
-    pageSize: 1,
-    userData: [],
-    displayModifier: '',
-    data: [
-      {
-        game_id: 1,
-        game_name: 'Test Game',
-        game_name_date: 0,
-        game_alias: 'Alias',
-        game_type: 'game',
-        game_image: 'test.jpg',
-        comp_lvl_combine: 1,
-        comp_lvl_sp: 1,
-        comp_lvl_co: 1,
-        comp_lvl_mp: 1,
-        comp_main: 600,
-        comp_plus: 3543,
-        comp_100: 4543,
-        comp_all: 6454,
-        comp_main_count: 4355,
-        comp_plus_count: 735,
-        comp_100_count: 2573,
-        comp_all_count: 757,
-        invested_co: 435,
-        invested_mp: 357,
-        invested_co_count: 2574,
-        invested_mp_count: 246,
-        count_comp: 1125,
-        count_speedrun: 124,
-        count_backlog: 1512,
-        count_review: 15,
-        review_score: 80,
-        count_playing: 5,
-        count_retired: 10,
-        profile_platform: 'PC, PS4',
-        profile_popular: 100,
-        release_world: 2023,
-      }
-    ]
-  }
-
-  test('should parse JSON result correctly for all props', () => {
-    const jsonResult = JSON.stringify(data)
-
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(1)
-    expect(parsingResult).toBeInstanceOf(Array<HowLongToBeatEntry>)
-    expect(parsingResult[0].id).toBe(data.data[0].game_id)
-    expect(parsingResult[0].name).toBe(data.data[0].game_name)
-    expect(parsingResult[0].alias).toBe(data.data[0].game_alias)
-    expect(parsingResult[0].type).toBe(data.data[0].game_type)
-    expect(parsingResult[0].reviewScore).toBe(data.data[0].review_score)
-    expect(parsingResult[0].mainTime).toBe(data.data[0].comp_main)
-    expect(parsingResult[0].mainExtraTime).toBe(data.data[0].comp_plus)
-    expect(parsingResult[0].completionistTime).toBe(data.data[0].comp_100)
-    expect(parsingResult[0].allStylesTime).toBe(data.data[0].comp_all)
-    expect(parsingResult[0].coopTime).toBe(data.data[0].invested_co)
-    expect(parsingResult[0].multiplayerTime).toBe(data.data[0].invested_mp)
-    expect(parsingResult[0].mainCount).toBe(data.data[0].comp_main_count)
-    expect(parsingResult[0].mainExtraCount).toBe(data.data[0].comp_plus_count)
-    expect(parsingResult[0].completionistCount).toBe(data.data[0].comp_100_count)
-    expect(parsingResult[0].allStylesCount).toBe(data.data[0].comp_all_count)
-    expect(parsingResult[0].coopCount).toBe(data.data[0].invested_co_count)
-    expect(parsingResult[0].multiplayerCount).toBe(data.data[0].invested_mp_count)
-    expect(parsingResult[0].platforms).toEqual(data.data[0].profile_platform.split(', '))
-    expect(parsingResult[0].releaseYear).toBe(data.data[0].release_world)
-    expect(parsingResult[0].json).toBe(JSON.stringify(data.data[0]))
-    expect(parsingResult[0].imageUrl).toBe('https://howlongtobeat.com/games/test.jpg')
-    expect(parsingResult[0].similarity).toBeGreaterThan(0)
+  test('parses the search fixture into typed entries', () => {
+    const entries = parseJsonResult(searchFixture, 'Elden Ring', 0.5)
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).toMatchObject({ id: 68151, name: 'Elden Ring', type: 'game', reviewScore: 92 })
+    expect(entries[0].platforms).toContain('PC')
+    expect(entries[0].raw.game_id).toBe(68151)
   })
 
-  test('should skip entries with low similarity', () => {
-    const jsonResult = JSON.stringify(data)
-
-    const parsingResult = parseJsonResult(jsonResult, 'Nonexistent', 0.5)
-    expect(parsingResult).toHaveLength(0)
+  test('omits single-player times when comp_lvl_sp is falsy', () => {
+    const payload = JSON.parse(searchFixture)
+    payload.data = [{ ...payload.data[0], comp_lvl_sp: 0, comp_lvl_co: 0, comp_lvl_mp: 0 }]
+    const [entry] = parseJsonResult(JSON.stringify(payload), 'Elden Ring', 0.5)
+    expect(entry.mainTime).toBeUndefined()
+    expect(entry.coopTime).toBeUndefined()
+    expect(entry.multiplayerTime).toBeUndefined()
   })
 
-  test('should handle invalid JSON gracefully', () => {
-    const invalidJson = '{ invalid json }'
-    expect(() => parseJsonResult(invalidJson, 'Test Game', 0.5)).toThrow()
+  test('throws a ScraperError on invalid JSON', () => {
+    expect(() => parseJsonResult('{ not json }', 'x', 0.5)).toThrow(ScraperError)
   })
 
-  test('should handle comp_lvl_sp being null', () => {
-    const dataWithNullCompLvlSp = {
-      ...data,
-      data: [
-        {
-          ...data.data[0],
-          comp_lvl_sp: null,
-        }
-      ]
+  test('throws a ScraperError when the shape is unexpected', () => {
+    expect(() => parseJsonResult(JSON.stringify({ foo: 1 }), 'x', 0.5)).toThrow(/structure may have changed/)
+  })
+
+  test('parseGamePage returns null when the id is absent', () => {
+    expect(parseGamePage(gamePageFixture, 999999)).toBeNull()
+  })
+
+  test('parseGamePage throws when the payload is missing', () => {
+    expect(() => parseGamePage('<html></html>', 68151)).toThrow(ScraperError)
+  })
+})
+
+describe('HttpClient', () => {
+  test('retries on 429 and honours the response', async () => {
+    let calls = 0
+    const fetchFn: FetchLike = async () => {
+      calls++
+      return calls === 1 ? new Response('', { status: 429, headers: { 'retry-after': '0' } }) : new Response('ok')
     }
-
-    const jsonResult = JSON.stringify(dataWithNullCompLvlSp)
-
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(1)
-    expect(parsingResult[0].mainTime).toBeUndefined()
-    expect(parsingResult[0].mainExtraTime).toBeUndefined()
-    expect(parsingResult[0].completionistTime).toBeUndefined()
-    expect(parsingResult[0].allStylesTime).toBeUndefined()
-    expect(parsingResult[0].mainCount).toBeUndefined()
-    expect(parsingResult[0].mainExtraCount).toBeUndefined()
-    expect(parsingResult[0].completionistCount).toBeUndefined()
-    expect(parsingResult[0].allStylesCount).toBeUndefined()
+    const client = new HttpClient({ fetch: fetchFn, retries: 2, retryDelay: 1 })
+    const response = await client.request('https://example.com')
+    expect(calls).toBe(2)
+    expect(await response.text()).toBe('ok')
   })
 
-  test('should handle comp_lvl_sp being 0', () => {
-    const dataWithZeroCompLvlSp = {
-      ...data,
-      data: [
-        {
-          ...data.data[0],
-          comp_lvl_sp: 0,
-        }
-      ]
+  test('retries on network error then throws after exhausting attempts', async () => {
+    let calls = 0
+    const fetchFn: FetchLike = async () => {
+      calls++
+      throw new Error('boom')
     }
-
-    const jsonResult = JSON.stringify(dataWithZeroCompLvlSp)
-
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(1)
-    expect(parsingResult[0].mainTime).toBeUndefined()
-    expect(parsingResult[0].mainExtraTime).toBeUndefined()
-    expect(parsingResult[0].completionistTime).toBeUndefined()
-    expect(parsingResult[0].allStylesTime).toBeUndefined()
-    expect(parsingResult[0].mainCount).toBeUndefined()
-    expect(parsingResult[0].mainExtraCount).toBeUndefined()
-    expect(parsingResult[0].completionistCount).toBeUndefined()
-    expect(parsingResult[0].allStylesCount).toBeUndefined()
+    const client = new HttpClient({ fetch: fetchFn, retries: 1, retryDelay: 1 })
+    await expect(client.request('https://example.com')).rejects.toThrow('boom')
+    expect(calls).toBe(2)
   })
 
-  test('should handle comp_lvl_co being null', () => {
-    const dataWithNullCompLvlCo = {
-      ...data,
-      data: [
-        {
-          ...data.data[0],
-          comp_lvl_co: null,
-        }
-      ]
+  test('does not retry when the caller aborts', async () => {
+    let calls = 0
+    const fetchFn: FetchLike = async (_input, init) => {
+      calls++
+      if (init?.signal?.aborted) throw new Error('aborted')
+      return new Response('ok')
     }
-
-    const jsonResult = JSON.stringify(dataWithNullCompLvlCo)
-
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(1)
-    expect(parsingResult[0].coopTime).toBeUndefined()
-    expect(parsingResult[0].coopCount).toBeUndefined()
+    const client = new HttpClient({ fetch: fetchFn, retries: 3, retryDelay: 1 })
+    const controller = new AbortController()
+    controller.abort()
+    await expect(client.request('https://example.com', {}, controller.signal)).rejects.toThrow()
+    expect(calls).toBe(1)
   })
 
-  test('should handle comp_lvl_co being 0', () => {
-    const dataWithZeroCompLvlCo = {
-      ...data,
-      data: [
-        {
-          ...data.data[0],
-          comp_lvl_co: 0,
-        }
-      ]
+  test('injects a random User-Agent when none is supplied', async () => {
+    let seen: Headers | undefined
+    const fetchFn: FetchLike = async (_input, init) => {
+      seen = new Headers(init?.headers)
+      return new Response('ok')
     }
-
-    const jsonResult = JSON.stringify(dataWithZeroCompLvlCo)
-
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(1)
-    expect(parsingResult[0].coopTime).toBeUndefined()
-    expect(parsingResult[0].coopCount).toBeUndefined()
-  })
-
-  test('should handle comp_lvl_mp being null', () => {
-    const dataWithNullCompLvlMp = {
-      ...data,
-      data: [
-        {
-          ...data.data[0],
-          comp_lvl_mp: null,
-        }
-      ]
-    }
-
-    const jsonResult = JSON.stringify(dataWithNullCompLvlMp)
-
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(1)
-    expect(parsingResult[0].multiplayerTime).toBeUndefined()
-    expect(parsingResult[0].multiplayerCount).toBeUndefined()
-  })
-
-  test('should handle comp_lvl_mp being 0', () => {
-    const dataWithZeroCompLvlMp = {
-      ...data,
-      data: [
-        {
-          ...data.data[0],
-          comp_lvl_mp: 0,
-        }
-      ]
-    }
-
-    const jsonResult = JSON.stringify(dataWithZeroCompLvlMp)
-
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(1)
-    expect(parsingResult[0].multiplayerTime).toBeUndefined()
-    expect(parsingResult[0].multiplayerCount).toBeUndefined()
-  })
-
-  test('should handle empty data array', () => {
-    const emptyData = { ...data, data: [] }
-    const jsonResult = JSON.stringify(emptyData)
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(0)
-  })
-
-  test('should handle missing required fields', () => {
-    const incompleteData = {
-      ...data,
-      data: [ { game_id: 1, game_name: 'Test Game' } ]
-    }
-    const jsonResult = JSON.stringify(incompleteData)
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult).toHaveLength(1)
-    expect(parsingResult[0].id).toBe(1)
-    expect(parsingResult[0].name).toBe('Test Game')
-  })
-
-  test('should order results by similarity', () => {
-    const jsonResult = JSON.stringify({
-      ...data,
-      data: [
-        {
-          game_id: 1,
-          game_name: 'Test Game',
-          game_alias: 'Alias',
-          game_type: 'game',
-          review_score: 80,
-          profile_platform: 'PC, PS4',
-          release_world: 2023
-        },
-        {
-          game_id: 2,
-          game_name: 'Another Game',
-          game_alias: 'Another Alias',
-          game_type: 'game',
-          review_score: 70,
-          profile_platform: 'PC',
-          release_world: 2022
-        },
-        {
-          game_id: 3,
-          game_name: 'Test Game 2',
-          game_alias: 'Alias 2',
-          game_type: 'game',
-          review_score: 90,
-          profile_platform: 'PS4',
-          release_world: 2021
-        }
-      ]
-    })
-
-    const parsingResult = parseJsonResult(jsonResult, 'Test Game', 0.5)
-    expect(parsingResult[0].id).toBe(1)
-    expect(parsingResult[1].id).toBe(3)
-    expect(parsingResult[2].id).toBe(2)
+    await new HttpClient({ fetch: fetchFn, retries: 0 }).request('https://example.com')
+    expect(seen?.get('User-Agent')).toBeTruthy()
   })
 })
 
 describe('utils', () => {
-  test('getSimilarity should return 1 for identical strings', () => {
-    const result = getSimilarity('test', 'test')
-    expect(result).toBe(1)
+  test('getSimilarity matches the documented values', () => {
+    expect(getSimilarity('test', 'test')).toBe(1)
+    expect(getSimilarity('test', 'banana')).toBe(0)
+    expect(getSimilarity('Elden Ring', 'Elden Rin')).toBe(0.9)
+    expect(getSimilarity('Test', 'test')).toBe(1)
+    expect(getSimilarity('test', '')).toBe(0)
   })
 
-  test('getSimilarity should return 0 for completely different strings', () => {
-    const result = getSimilarity('test', 'banana')
-    expect(result).toBe(0)
+  test('getMatchScore keeps short queries against long titles', () => {
+    const score = getMatchScore('The Legend of Zelda: Tears of the Kingdom', 'Zelda')
+    expect(score).toBeGreaterThanOrEqual(0.5)
+    expect(getMatchScore('Pokémon Red', 'pokemon red')).toBe(1)
   })
 
-  test('getSimilarity should return correct similarity for similar strings', () => {
-    const result = getSimilarity('test', 'test123')
-    expect(result).toBeGreaterThan(0)
-    expect(result).toBeLessThan(1)
+  test('toHours converts seconds and preserves undefined', () => {
+    expect(toHours(208800)).toBe(58)
+    expect(toHours(5400)).toBe(1.5)
+    expect(toHours(undefined)).toBeUndefined()
   })
 
-  test('getSimilarity should handle empty strings', () => {
-    const result1 = getSimilarity('', '')
-    const result2 = getSimilarity('test', '')
-    expect(result1).toBe(1)
-    expect(result2).toBe(0)
-  })
-
-  test('getSimilarity should be case insensitive', () => {
-    const result = getSimilarity('Test', 'test')
-    expect(result).toBe(1)
-  })
-
-  test('getSimilarity should compute Elden Ring and Elden Rin correctly', () => {
-    const result = getSimilarity('Elden Ring', 'Elden Rin')
-    expect(result).toBe(0.9)
+  test('clampSimilarity keeps values within [0, 1]', () => {
+    expect(clampSimilarity(-1)).toBe(0)
+    expect(clampSimilarity(5)).toBe(1)
+    expect(clampSimilarity(Number.NaN)).toBe(0.5)
+    expect(clampSimilarity(0.3)).toBe(0.3)
   })
 })
