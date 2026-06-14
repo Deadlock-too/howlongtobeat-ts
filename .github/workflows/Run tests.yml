@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -25,7 +25,7 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Notify on failure (example)
+      - name: Notify on failure
         if: failure()
         run: |
           echo "Workflow failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
