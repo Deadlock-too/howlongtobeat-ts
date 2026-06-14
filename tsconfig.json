@@ -11,12 +11,6 @@
     "noImplicitAny": true,
     "strictNullChecks": true
   },
-  "include": [
-    "src"
-  ],
-  "exclude": [
-    "node_modules",
-    "tests",
-    "dist"
-  ]
+  "include": ["src"],
+  "exclude": ["node_modules", "tests", "dist"]
 }

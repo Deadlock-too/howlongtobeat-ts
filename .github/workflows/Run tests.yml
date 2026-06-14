@@ -3,7 +3,7 @@ name: Tests (every 6 hours)
 on:
   schedule:
     # Every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
-    - cron: "0 */6 * * *"
+    - cron: '0 */6 * * *'
   workflow_dispatch: {}
 
 jobs:
@@ -22,8 +22,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
+      - name: Run unit tests
         run: npm test
+
+      - name: Run integration tests (live API)
+        run: npm run test:integration
 
       - name: Notify on failure
         if: failure()
