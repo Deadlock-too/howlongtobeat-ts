@@ -1,4 +1,4 @@
-import { Result } from '../core/result'
+import { Result } from '../core'
 
 /** Result of {@link HowLongToBeatService.search}. */
 export type SearchResult = Result<HowLongToBeatEntry[]>

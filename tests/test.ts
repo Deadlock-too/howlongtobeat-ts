@@ -1,11 +1,9 @@
 import { describe, expect, test } from '@jest/globals'
 import { readFileSync } from 'node:fs'
 import { HowLongToBeatService, SearchModifier, ScraperError, toHours } from '../src'
-import { type InitResponse } from '../src/lib/service'
-import { getMatchScore, getSimilarity } from '../src/lib/utils'
+import { type InitResponse, getMatchScore, getSimilarity } from '../src'
 import { parseGamePage, parseJsonResult } from '../src/lib/parser'
-import { HttpClient, type FetchLike } from '../src/core/http'
-import { clampSimilarity } from '../src/core/options'
+import { HttpClient, type FetchLike, clampSimilarity } from '../src/core'
 
 const searchFixture = readFileSync('tests/fixtures/search-response.json', 'utf8')
 const gamePageFixture = readFileSync('tests/fixtures/game-page.html', 'utf8')
@@ -197,7 +195,7 @@ describe('parser', () => {
   })
 
   test('parseGamePage throws when the payload is missing', () => {
-    expect(() => parseGamePage('<html></html>', 68151)).toThrow(ScraperError)
+    expect(() => parseGamePage('<html lang="en-US"></html>', 68151)).toThrow(ScraperError)
   })
 })
 

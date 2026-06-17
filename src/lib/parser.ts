@@ -1,6 +1,5 @@
 import { HowLongToBeatEntry, HowLongToBeatJsonResult, HowLongToBeatResultEntry } from './types'
-import { getMatchScore } from '../core/similarity'
-import { ScraperError } from '../core/errors'
+import { getMatchScore, ScraperError } from '../core'
 
 const IMAGE_URL_PREFIX = 'https://howlongtobeat.com/games/'
 
