@@ -52,7 +52,8 @@ export function parseGamePage(html: string, id: number): HowLongToBeatEntry | nu
   const gameData = findGameObject(parsed, id)
   if (!gameData) return null
 
-  return mapEntry(gameData, gameData.game_name ?? '')
+  // findGameObject only matches nodes whose game_name is a string.
+  return mapEntry(gameData, gameData.game_name)
 }
 
 function findGameObject(node: unknown, id: number): HowLongToBeatResultEntry | undefined {

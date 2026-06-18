@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { HowLongToBeatService, SearchModifier, ScraperError, toHours } from '../src'
 import { type InitResponse, getMatchScore, getSimilarity } from '../src'
 import { parseGamePage, parseJsonResult } from '../src/lib/parser'
+import { normalize } from '../src/lib/utils'
 import { HttpClient, type FetchLike, clampSimilarity } from '@deadlock-too/scrape-kit'
 
 const searchFixture = readFileSync('tests/fixtures/search-response.json', 'utf8')
@@ -57,6 +58,21 @@ describe('HowLongToBeatService – request building', () => {
     expect(payload).toMatchObject({ searchType: 'games', searchTerms: ['Test', 'Game'], searchPage: 2 })
     expect(payload.searchOptions.games.modifier).toBe(SearchModifier.ONLY_DLC)
   })
+
+  test('search forwards the chosen modifier in the request body', async () => {
+    let sentBody: string | undefined
+    const service = new HowLongToBeatService({
+      fetch: async (input, init) => {
+        if (String(input).includes('/init')) return new Response(AUTH_BODY)
+        sentBody = init?.body as string
+        return new Response(searchFixture)
+      },
+      retries: 0,
+    })
+    const result = await service.search('Elden Ring', { modifier: SearchModifier.HIDE_DLC })
+    expect(result.success).toBe(true)
+    expect(JSON.parse(sentBody!).searchOptions.games.modifier).toBe(SearchModifier.HIDE_DLC)
+  })
 })
 
 describe('HowLongToBeatService – search', () => {
@@ -108,6 +124,46 @@ describe('HowLongToBeatService – search', () => {
     if (result.success) throw new Error('expected failure')
     expect(result.error).toMatch(/structure may have changed/)
   })
+
+  test('reports a failure when the auth response carries no token', async () => {
+    const service = makeService([
+      { match: (u) => u.includes('/init'), respond: () => new Response(JSON.stringify({ hpKey: 'hp', hpVal: 'val' })) },
+    ])
+    const result = await service.search('Elden Ring')
+    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
+  })
+
+  test('reports a failure when the auth response body is not an object', async () => {
+    const service = makeService([{ match: (u) => u.includes('/init'), respond: () => new Response('null') }])
+    const result = await service.search('Elden Ring')
+    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
+  })
+
+  test('reports a failure when the auth request throws', async () => {
+    const service = new HowLongToBeatService({
+      fetch: async (input) => {
+        if (String(input).includes('/init')) throw new Error('network down')
+        return new Response('')
+      },
+      retries: 0,
+    })
+    const result = await service.search('Elden Ring')
+    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
+  })
+
+  test('reports a generic failure when the search request throws a non-ScraperError', async () => {
+    const service = makeService([
+      initRoute(),
+      {
+        match: (u) => u.endsWith('/bleed'),
+        respond: () => {
+          throw new Error('socket hang up')
+        },
+      },
+    ])
+    const result = await service.search('Elden Ring')
+    expect(result).toEqual({ success: false, error: 'Failed to parse search results' })
+  })
 })
 
 describe('HowLongToBeatService – searchOne & getById', () => {
@@ -120,6 +176,14 @@ describe('HowLongToBeatService – searchOne & getById', () => {
     expect(result.success).toBe(true)
     if (!result.success) throw new Error('expected success')
     expect(result.data?.id).toBe(68151)
+  })
+
+  test('searchOne propagates a search failure', async () => {
+    const service = makeService([
+      { match: (u) => u.includes('/init'), respond: () => new Response('', { status: 403 }) },
+    ])
+    const result = await service.searchOne('Elden Ring')
+    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
   })
 
   test('searchOne returns null when nothing matches', async () => {
@@ -143,6 +207,25 @@ describe('HowLongToBeatService – searchOne & getById', () => {
     if (!result.success) throw new Error('expected success')
     expect(result.data?.name).toBe('Elden Ring')
     expect(result.data?.mainTime).toBe(208800)
+  })
+
+  test('getById surfaces a clear error when the game page request fails', async () => {
+    const service = makeService([
+      { match: (u) => u.includes('/game/'), respond: () => new Response('', { status: 500 }) },
+    ])
+    const result = await service.getById(68151)
+    expect(result).toEqual({ success: false, error: 'Game page request failed with status 500' })
+  })
+
+  test('getById reports a generic failure when the request throws', async () => {
+    const service = new HowLongToBeatService({
+      fetch: async () => {
+        throw new Error('network down')
+      },
+      retries: 0,
+    })
+    const result = await service.getById(68151)
+    expect(result).toEqual({ success: false, error: 'Failed to fetch the game page' })
   })
 })
 
@@ -196,6 +279,19 @@ describe('parser', () => {
 
   test('parseGamePage throws when the payload is missing', () => {
     expect(() => parseGamePage('<html lang="en-US"></html>', 68151)).toThrow(ScraperError)
+  })
+
+  test('parseGamePage throws when the embedded payload is not valid JSON', () => {
+    const html = '<script id="__NEXT_DATA__" type="application/json">{ not json }</script>'
+    expect(() => parseGamePage(html, 68151)).toThrow(ScraperError)
+  })
+
+  test('maps an entry with no platform or image to empty platforms and no imageUrl', () => {
+    const payload = JSON.parse(searchFixture)
+    payload.data = [{ ...payload.data[0], profile_platform: '', game_image: '' }]
+    const [entry] = parseJsonResult(JSON.stringify(payload), 'Elden Ring', 0.5)
+    expect(entry.platforms).toEqual([])
+    expect(entry.imageUrl).toBeUndefined()
   })
 })
 
@@ -274,5 +370,10 @@ describe('utils', () => {
     expect(clampSimilarity(5)).toBe(1)
     expect(clampSimilarity(Number.NaN)).toBe(0.5)
     expect(clampSimilarity(0.3)).toBe(0.3)
+  })
+
+  test('normalize strips diacritics, case and punctuation', () => {
+    expect(normalize('Pokémon')).toBe('pokemon')
+    expect(normalize("Marvel's Spider-Man")).toBe('marvel s spider man')
   })
 })

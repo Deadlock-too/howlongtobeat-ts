@@ -69,9 +69,6 @@ export class HowLongToBeatService extends BaseScraperService {
 
     try {
       const html = await this.sendGamePageRequest(id, options.signal)
-      if (html == null) {
-        return fail('Failed to obtain the game page')
-      }
       return ok(parseGamePage(html, id))
     } catch (error) {
       this.logger.error('Error fetching game by id:', error)
@@ -105,7 +102,7 @@ export class HowLongToBeatService extends BaseScraperService {
     return response.text()
   }
 
-  private async sendGamePageRequest(id: number, signal?: AbortSignal): Promise<string | undefined> {
+  private async sendGamePageRequest(id: number, signal?: AbortSignal): Promise<string> {
     const headers = {
       'User-Agent': this.http.randomUserAgent(),
       Referer: HowLongToBeatService.REFERER_HEADER,
