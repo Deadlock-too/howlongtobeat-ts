@@ -1,4 +1,4 @@
-import { Result } from '../core'
+import { Result } from '@deadlock-too/scrape-kit'
 
 /** Result of {@link HowLongToBeatService.search}. */
 export type SearchResult = Result<HowLongToBeatEntry[]>

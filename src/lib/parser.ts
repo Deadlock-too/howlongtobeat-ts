@@ -1,5 +1,5 @@
 import { HowLongToBeatEntry, HowLongToBeatJsonResult, HowLongToBeatResultEntry } from './types'
-import { getMatchScore, ScraperError } from '../core'
+import { getMatchScore, ScraperError } from '@deadlock-too/scrape-kit'
 
 const IMAGE_URL_PREFIX = 'https://howlongtobeat.com/games/'
 

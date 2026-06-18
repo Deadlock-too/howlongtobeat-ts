@@ -1,4 +1,4 @@
-export { getSimilarity, getMatchScore, normalize } from '../core/similarity'
+export { getSimilarity, getMatchScore, normalize } from '@deadlock-too/scrape-kit'
 
 /**
  * Converts a HowLongToBeat duration (in seconds) to hours, rounded to

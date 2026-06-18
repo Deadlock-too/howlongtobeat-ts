@@ -1,6 +1,6 @@
 import { parseGamePage, parseJsonResult } from './parser'
 import { EntryResult, SearchResult, SearchModifier } from './types'
-import { BaseScraperService, ScraperOptions, ScraperError, fail, ok } from '../core'
+import { BaseScraperService, ScraperOptions, ScraperError, fail, ok } from '@deadlock-too/scrape-kit'
 
 export type InitResponse = {
   token: string
