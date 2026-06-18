@@ -1,5 +1,5 @@
 ---
-'howlongtobeat-ts': major
+'howlongtobeat-ts': minor
 ---
 
 Type-safety, resilience and tooling overhaul:
