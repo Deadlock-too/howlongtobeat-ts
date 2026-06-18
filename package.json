@@ -74,6 +74,6 @@
     "typescript-eslint": "^8.61.1"
   },
   "dependencies": {
-    "@deadlock-too/scrape-kit": "^1.0.0"
+    "@deadlock-too/scrape-kit": "^1.0.2"
   }
 }

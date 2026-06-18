@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { HowLongToBeatService, SearchModifier, ScraperError, toHours } from '../src'
 import { type InitResponse, getMatchScore, getSimilarity } from '../src'
 import { parseGamePage, parseJsonResult } from '../src/lib/parser'
-import { HttpClient, type FetchLike, clampSimilarity } from '../src/core'
+import { HttpClient, type FetchLike, clampSimilarity } from '@deadlock-too/scrape-kit'
 
 const searchFixture = readFileSync('tests/fixtures/search-response.json', 'utf8')
 const gamePageFixture = readFileSync('tests/fixtures/game-page.html', 'utf8')
