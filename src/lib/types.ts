@@ -1,8 +1,10 @@
-export type SearchResult = {
-  success: boolean
-  error?: string
-  data: HowLongToBeatEntry[]
-}
+import { Result } from '@deadlock-too/scrape-kit'
+
+/** Result of {@link HowLongToBeatService.search}. */
+export type SearchResult = Result<HowLongToBeatEntry[]>
+
+/** Result of {@link HowLongToBeatService.searchOne} and {@link HowLongToBeatService.getById}. */
+export type EntryResult = Result<HowLongToBeatEntry | null>
 
 export type HowLongToBeatJsonResult = {
   color: string
@@ -13,7 +15,7 @@ export type HowLongToBeatJsonResult = {
   pageTotal: number
   pageSize: number
   data: HowLongToBeatResultEntry[]
-  userData: any[]
+  userData: unknown[]
   displayModifier: string
 }
 
@@ -28,11 +30,17 @@ export type HowLongToBeatEntry = {
   name: string
   alias: string
   type: string
+  /** Average main-story completion time, in seconds. */
   mainTime?: number
+  /** Average main + extras completion time, in seconds. */
   mainExtraTime?: number
+  /** Average 100% completion time, in seconds. */
   completionistTime?: number
+  /** Average "all styles" completion time, in seconds. */
   allStylesTime?: number
+  /** Average co-op completion time, in seconds. */
   coopTime?: number
+  /** Average multiplayer completion time, in seconds. */
   multiplayerTime?: number
   mainCount?: number
   mainExtraCount?: number
@@ -44,7 +52,8 @@ export type HowLongToBeatEntry = {
   reviewScore: number
   platforms: string[]
   similarity: number
-  json: string
+  /** The raw, typed entry exactly as returned by HowLongToBeat. */
+  raw: HowLongToBeatResultEntry
   releaseYear: number
 }
 

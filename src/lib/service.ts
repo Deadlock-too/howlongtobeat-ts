@@ -1,123 +1,157 @@
-import { parseJsonResult } from './parser'
-import { SearchResult, SearchModifier } from './types'
+import { parseGamePage, parseJsonResult } from './parser'
+import { EntryResult, SearchResult, SearchModifier } from './types'
+import { BaseScraperService, ScraperOptions, ScraperError, fail, ok } from '@deadlock-too/scrape-kit'
 
 export type InitResponse = {
-  token: string,
-  hpKey: string,
-  hpVal: string,
-  userAgent: string,
+  token: string
+  hpKey: string
+  hpVal: string
+  userAgent: string
 }
 
-export class HowLongToBeatService {
-  minSimilarity: number
+export interface HltbSearchOptions {
+  /** Filter DLC entries in/out of the results. */
+  modifier?: SearchModifier
+  /** Caller-supplied signal to cancel the in-flight request. */
+  signal?: AbortSignal
+}
 
+export class HowLongToBeatService extends BaseScraperService {
   static BASE_URL = 'https://howlongtobeat.com/'
-  static REFERER_HEADER = HowLongToBeatService.BASE_URL
-  static SEARCH_URL = HowLongToBeatService.BASE_URL + 'api/bleed'
-
-  static USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
-  ]
-
-  constructor(minSimilarity: number = 0.5) {
-    this.minSimilarity = minSimilarity
+  static get REFERER_HEADER() {
+    return HowLongToBeatService.BASE_URL
+  }
+  static get SEARCH_URL() {
+    return HowLongToBeatService.BASE_URL + 'api/bleed'
+  }
+  static get INIT_URL() {
+    return HowLongToBeatService.BASE_URL + 'api/bleed/init'
   }
 
-  async search(searchKey: string, searchModifier: SearchModifier = SearchModifier.NONE): Promise<SearchResult> {
-    if (!searchKey || searchKey.length === 0) {
-      return { success: false, error: 'Search key is empty', data: [] }
-    }
+  constructor(options: number | ScraperOptions = {}) {
+    super(options)
+  }
 
-    const htmlResult = await HowLongToBeatService.sendWebRequest(searchKey, searchModifier)
-    if (!htmlResult) {
-      return { success: false, error: 'Failed to obtain search results', data: [] }
+  async search(searchKey: string, options: HltbSearchOptions = {}): Promise<SearchResult> {
+    if (!searchKey) {
+      return fail('Search key is empty')
     }
 
     try {
-      const data = parseJsonResult(htmlResult, searchKey, this.minSimilarity)
-      return { success: true, data }
+      const result = await this.sendSearchRequest(searchKey, options)
+      if (result == null) {
+        return fail('Failed to obtain search results')
+      }
+      return ok(parseJsonResult(result, searchKey, this.minSimilarity))
     } catch (error) {
-      console.error('Error parsing search results:', error)
-      return { success: false, error: 'Failed to parse search results', data: [] }
+      this.logger.error('Error parsing search results:', error)
+      return fail(error instanceof ScraperError ? error.message : 'Failed to parse search results')
     }
   }
 
-  static async sendWebRequest(searchKey: string, searchModifier: SearchModifier = SearchModifier.NONE, page = 1): Promise<string | undefined> {
-    const authInfo = await this.sendWebsiteRequestGetAuthInfo()
+  /** Convenience wrapper returning only the single best match (or `null`). */
+  async searchOne(searchKey: string, options: HltbSearchOptions = {}): Promise<EntryResult> {
+    const result = await this.search(searchKey, options)
+    if (!result.success) return result
+    return ok(result.data.length > 0 ? result.data[0] : null)
+  }
+
+  /**
+   * Fetches a single game directly by its HowLongToBeat id.
+   *
+   * @experimental Relies on the public game page payload, which is not part of
+   * a documented API and may change without notice.
+   */
+  async getById(id: number, options: { signal?: AbortSignal } = {}): Promise<EntryResult> {
+    if (!id || id <= 0) {
+      return fail('A valid game id is required')
+    }
+
+    try {
+      const html = await this.sendGamePageRequest(id, options.signal)
+      return ok(parseGamePage(html, id))
+    } catch (error) {
+      this.logger.error('Error fetching game by id:', error)
+      return fail(error instanceof ScraperError ? error.message : 'Failed to fetch the game page')
+    }
+  }
+
+  private async sendSearchRequest(searchKey: string, options: HltbSearchOptions): Promise<string | undefined> {
+    const authInfo = await this.getAuthInfo(options.signal)
     if (!authInfo) {
-      console.error('Failed to obtain auth token')
+      this.logger.error('Failed to obtain auth token')
       return undefined
     }
-    const headers = this.getSearchRequestHeaders(authInfo)
 
-    const payload = HowLongToBeatService.getSearchRequestData(searchKey, searchModifier, page, authInfo)
+    const headers = HowLongToBeatService.getSearchRequestHeaders(authInfo)
+    const payload = HowLongToBeatService.getSearchRequestData(
+      searchKey,
+      options.modifier ?? SearchModifier.NONE,
+      1,
+      authInfo,
+    )
+
+    const response = await this.http.request(
+      HowLongToBeatService.SEARCH_URL,
+      { method: 'POST', headers, body: payload },
+      options.signal,
+    )
+    if (!response.ok) {
+      throw new ScraperError(`Search request failed with status ${response.status}`)
+    }
+    return response.text()
+  }
+
+  private async sendGamePageRequest(id: number, signal?: AbortSignal): Promise<string> {
+    const headers = {
+      'User-Agent': this.http.randomUserAgent(),
+      Referer: HowLongToBeatService.REFERER_HEADER,
+    }
+    const response = await this.http.request(`${HowLongToBeatService.BASE_URL}game/${id}`, { headers }, signal)
+    if (!response.ok) {
+      throw new ScraperError(`Game page request failed with status ${response.status}`)
+    }
+    return response.text()
+  }
+
+  private async getAuthInfo(signal?: AbortSignal): Promise<InitResponse | null> {
+    const userAgent = this.http.randomUserAgent()
+    const headers = { 'User-Agent': userAgent, Referer: HowLongToBeatService.REFERER_HEADER }
 
     try {
-      const response = await fetch(HowLongToBeatService.SEARCH_URL, {
-        headers: headers,
-        method: 'POST',
-        body: payload,
-        signal: AbortSignal.timeout(60000)
-      })
-      if (response.ok) {
-        return await response.text()
+      const response = await this.http.request(`${HowLongToBeatService.INIT_URL}?t=${Date.now()}`, { headers }, signal)
+      if (!response.ok) return null
+
+      const json = await response.json()
+      if (json && json.token) {
+        return { ...json, userAgent } as InitResponse
       }
-      console.error('Search request failed with status:', response.status)
-      console.error('Response body:', await response.text())
+      this.logger.error('Auth token not found in JSON response')
+      return null
     } catch (error) {
-      console.error('Error fetching search results with auth token:', error)
+      this.logger.error('Error fetching auth info:', error)
+      return null
     }
   }
 
-  static getSearchRequestHeaders(authInfo: InitResponse) {
+  static getSearchRequestHeaders(authInfo: InitResponse): Record<string, string> {
     return {
       'Content-Type': 'application/json',
       'User-Agent': authInfo.userAgent,
-      'Accept': '*/*',
-      'Referer': HowLongToBeatService.REFERER_HEADER,
+      Accept: '*/*',
+      Referer: HowLongToBeatService.REFERER_HEADER,
       'X-Auth-Token': authInfo.token,
       'X-Hp-Key': authInfo.hpKey,
       'X-Hp-Val': authInfo.hpVal,
     }
   }
 
-  static getTitleRequestHeaders() {
-    const userAgent = HowLongToBeatService.USER_AGENTS[Math.floor(Math.random() * HowLongToBeatService.USER_AGENTS.length)]
-    return {
-      'User-Agent': userAgent,
-      'Referer': HowLongToBeatService.REFERER_HEADER,
-    }
-  }
-
-  static async sendWebsiteRequestGetAuthInfo(): Promise<InitResponse | null> {
-    const headers = this.getTitleRequestHeaders()
-    try {
-      const response = await fetch(HowLongToBeatService.BASE_URL + `api/bleed/init?t=${new Date().getTime()}`, {
-        headers: headers,
-        signal: AbortSignal.timeout(60000)
-      })
-
-      if (response.ok) {
-        const json = await response.json()
-        if (json && json.token) {
-          return { ...json, userAgent: headers['User-Agent'] } as InitResponse
-        } else {
-          console.error('Auth token not found in JSON response')
-        }
-      }
-
-      return null
-    } catch (error) {
-      console.error('Error fetching website:', error)
-      return null
-    }
-  }
-
-  static getSearchRequestData(searchKey: string, searchModifier: SearchModifier, page: number, initResponse: InitResponse): string {
+  static getSearchRequestData(
+    searchKey: string,
+    searchModifier: SearchModifier,
+    page: number,
+    initResponse: InitResponse,
+  ): string {
     const payload = {
       [initResponse.hpKey]: initResponse.hpVal,
       searchType: 'games',
@@ -130,31 +164,16 @@ export class HowLongToBeatService {
           platform: '',
           sortCategory: 'popular',
           rangeCategory: 'main',
-          rangeTime: {
-            min: 0,
-            max: 0,
-          },
-          gameplay: {
-            perspective: '',
-            flow: '',
-            genre: '',
-            difficulty: '',
-          },
-          rangeYear: {
-            min: '',
-            max: '',
-          },
+          rangeTime: { min: 0, max: 0 },
+          gameplay: { perspective: '', flow: '', genre: '', difficulty: '' },
+          rangeYear: { min: '', max: '' },
           modifier: searchModifier,
         },
-        users: {
-          sortCategory: 'postcount',
-        },
-        lists: {
-          sortCategory: 'follows',
-        },
+        users: { sortCategory: 'postcount' },
+        lists: { sortCategory: 'follows' },
         filter: '',
         sort: 0,
-        randomizer: 0
+        randomizer: 0,
       },
       useCache: true,
     }

@@ -1,2 +1,11 @@
 export { HowLongToBeatService } from './lib/service'
+export type { HltbSearchOptions, InitResponse } from './lib/service'
 export * from './lib/types'
+export { toHours, getSimilarity, getMatchScore } from './lib/utils'
+
+export type { Result, Success, Failure } from '@deadlock-too/scrape-kit'
+export type { ScraperOptions } from '@deadlock-too/scrape-kit'
+export type { HttpClientOptions, FetchLike } from '@deadlock-too/scrape-kit'
+export type { Logger } from '@deadlock-too/scrape-kit'
+export { consoleLogger, silentLogger } from '@deadlock-too/scrape-kit'
+export { ScraperError } from '@deadlock-too/scrape-kit'

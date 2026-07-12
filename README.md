@@ -1,8 +1,10 @@
 # howlongtobeat-ts
+
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Deadlock-too/howlongtobeat-ts)
 [![GitHub](https://img.shields.io/github/license/Deadlock-too/howlongtobeat-ts)](https://github.com/Deadlock-too/howlongtobeat-ts)
 [![npm](https://img.shields.io/npm/v/howlongtobeat-ts)](https://www.npmjs.com/package/howlongtobeat-ts)
 [![npm](https://img.shields.io/npm/dt/howlongtobeat-ts)](https://www.npmjs.com/package/howlongtobeat-ts)
+[![CI](https://github.com/Deadlock-too/howlongtobeat-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/Deadlock-too/howlongtobeat-ts/actions/workflows/ci.yml)
 
 A TypeScript library for interacting with the HowLongToBeat website API. Easily search for games and retrieve estimates on how long it takes to complete them.
 
@@ -17,127 +19,129 @@ As also noted by toasttsunami in his implementation, this library was created du
 
 - Search for games on HowLongToBeat
 - Retrieve completion time data for games
-- TypeScript support with full type definitions
+- Fetch a single best match (`searchOne`) or look a game up directly by id (`getById`)
+- Resilient networking: configurable timeouts, retries with backoff, `429` handling, an injectable `fetch` and `AbortSignal` support
+- Fully typed, with a discriminated-union result type and zero `console` noise
 
 ## Installation
 
-Install the library via npm:
 ```bash
 npm install howlongtobeat-ts
 ```
 
+Requires Node.js 18 or newer (the library uses the global `fetch`). Ships both ESM and CommonJS builds.
+
 ## Usage
 
 ```typescript
-import { HowLongToBeatService, SearchModifier } from 'howlongtobeat-ts';
+import { HowLongToBeatService, SearchModifier } from 'howlongtobeat-ts'
 
-async function searchGame() {
-  const hltbService = new HowLongToBeatService();
-  
-  // Search for a game
-  const results = await hltbService.search('The Last of Us');
-  
-  if (results.success) {
-    console.log('Search results:', results.data);
-  } else {
-    console.error('Search failed:', results.error);
-  }
+const hltb = new HowLongToBeatService()
+
+const results = await hltb.search('The Last of Us')
+if (results.success) {
+  // `data` is only available on the success branch.
+  console.log(results.data)
+} else {
+  // `error` is only available on the failure branch.
+  console.error(results.error)
 }
 
-// With search modifier
-async function searchWithModifier() {
-  const hltbService = new HowLongToBeatService();
-  const results = await hltbService.search('Zelda', SearchModifier.HIDE_DLC);
-  
-  if (results.success) {
-    console.log('Search results:', results.data);
-  } else {
-    console.error('Search failed:', results.error);
-  }
+// Filter DLCs in/out via the options object.
+await hltb.search('Zelda', { modifier: SearchModifier.HIDE_DLC })
+
+// Just the single best match (or null).
+const best = await hltb.searchOne('Hades')
+if (best.success && best.data) {
+  console.log(best.data.name)
 }
 
-searchGame();
+// Look a game up directly by its HowLongToBeat id.
+const elden = await hltb.getById(68151)
+```
+
+### Working with completion times
+
+All `*Time` fields are expressed in **seconds**. Use the `toHours` helper to convert:
+
+```typescript
+import { toHours } from 'howlongtobeat-ts'
+
+const result = await hltb.searchOne('Elden Ring')
+if (result.success && result.data) {
+  console.log(`Main story: ${toHours(result.data.mainTime)} hours`)
+}
+```
+
+### Configuration
+
+Pass an options object to the constructor (a bare `number` is still accepted as `minSimilarity` for backwards compatibility):
+
+```typescript
+import { HowLongToBeatService, consoleLogger } from 'howlongtobeat-ts'
+
+const hltb = new HowLongToBeatService({
+  minSimilarity: 0.5, // min similarity threshold (0–1), clamped
+  timeout: 30_000, // per-request timeout in ms
+  retries: 2, // retry attempts on transient failures / 429 / 5xx
+  logger: consoleLogger, // opt in to diagnostic logging (default: silent)
+  // fetch: myCustomFetch,  // inject a custom fetch (proxy, undici agent, …)
+})
+
+// Cancel an in-flight request.
+const controller = new AbortController()
+const promise = hltb.search('Halo', { signal: controller.signal })
+controller.abort()
 ```
 
 ## API
 
 ### `HowLongToBeatService`
 
-The main service class for interacting with the HowLongToBeat website.
+- `constructor(options?: number | ScraperOptions)` — `ScraperOptions` extends the HTTP options (`timeout`, `retries`, `retryDelay`, `fetch`, `userAgents`, `logger`) with `minSimilarity`.
+- `search(searchKey, options?): Promise<SearchResult>` — `options` is `{ modifier?, signal? }`.
+- `searchOne(searchKey, options?): Promise<EntryResult>` — the best match or `null`.
+- `getById(id, options?): Promise<EntryResult>` — fetch by id (experimental; relies on the public game page).
 
-#### Constructor
+### `SearchResult` / `EntryResult`
 
-- `constructor(minSimilarity: number = 0.5)`: Creates an instance of the HowLongToBeatService class.
-    - `minSimilarity`: Optional parameter to set the minimum similarity threshold for search results to not be filtered out (Default: 0.5).
+Discriminated unions:
 
-#### Methods
-
-- `async search(searchKey: string, searchModifier: SearchModifier = SearchModifier.NONE): Promise<SearchResult>`: Searches for games matching the provided search key.
-    - `searchKey`: The game title to search for
-    - `searchModifier`: Optional search modifier to adjust search behavior that defaults to `SearchModifier.NONE` allowing all results.
-
-### `SearchResult`
-The result object returned by `HowLongToBeatService.search`.
-- `success`: `true` when the request and parsing complete successfully.
-- `error`: Optional error message when `success` is `false`.
-- `data`: Array of `HowLongToBeatEntry` items (empty on failure).
+```typescript
+type SearchResult = { success: true; data: HowLongToBeatEntry[] } | { success: false; error: string }
+type EntryResult = { success: true; data: HowLongToBeatEntry | null } | { success: false; error: string }
+```
 
 ### `SearchModifier`
-An enum representing different search modifiers that can be used to filter search results.
-- `NONE`: No modifier, all results are returned.
-- `HIDE_DLC`: Hides DLCs from the search results.
-- `ONLY_DLC`: Only shows DLCs in the search results.
+
+`NONE` (all results), `HIDE_DLC`, `ONLY_DLC`.
 
 ### `HowLongToBeatEntry`
-An interface representing a game entry returned from the HowLongToBeat API.
-- `id`: The unique identifier for the game.
-- `name`: The name of the game.
-- `mainTime`: The average time to complete the main story.
-- `mainCount`: The number of users who reported the main story completion time.
-- `mainExtraTime`: The average time to complete the main story plus extras.
-- `mainExtraCount`: The number of users who reported the main story plus extras completion time.
-- `completionistTime`: The average time to complete the game 100%.
-- `completionistCount`: The number of users who reported the 100% completion time.
-- `allStylesTime`: The average time to complete the game in all styles.
-- `allStylesCount`: The number of users who reported the all styles completion time.
-- `coopTime`: The average time to complete the game in co-op mode.
-- `coopCount`: The number of users who reported the co-op completion time.
-- `multiplayerTime`: The average time to complete the game in multiplayer mode.
-- `multiplayerCount`: The number of users who reported the multiplayer completion time.
-- `imageUrl`: The URL of the game's image.
-- `reviewScore`: The review score of the game on HowLongToBeat.
-- `platforms`: An array of platforms the game is available on.
-- `similarity`: The similarity score of the game to the search query.
-- `releaseYear`: The release year of the game.
-- `json`: The raw JSON response from the HowLongToBeat API allowing for further inspection. 
+
+`id`, `name`, `alias`, `type`, the `*Time` fields (in seconds) and matching `*Count` fields, `imageUrl`, `reviewScore`, `platforms`, `similarity`, `releaseYear`, and `raw` — the typed `HowLongToBeatResultEntry` exactly as returned by HowLongToBeat.
 
 ## Development
 
-### Prerequisites
-
-- Node.js
-- npm or yarn
-
-### Setup
-
 ```bash
-# Clone the repository
 git clone https://github.com/Deadlock-too/howlongtobeat-ts.git
-
-# Install dependencies
 cd howlongtobeat-ts
 npm install
 
-# Build the project
-npm run build
-
-# Run tests
-npm test
+npm run build            # build with tsup
+npm test                 # unit tests
+npm run test:integration # live API tests (hit HowLongToBeat)
+npm run test:coverage    # unit tests with coverage
+npm run lint             # eslint
+npm run format           # prettier
 ```
 
+Releases are managed with [Changesets](https://github.com/changesets/changesets): run `npm run changeset` to record a change; the release workflow publishes to npm once the generated version PR is merged.
+
 ## Issues, Questions & Discussions
+
 If you found a bug, report it as soon as possible creating an [issue](https://github.com/Deadlock-too/howlongtobeat-ts/issues/new), the code is not perfect for sure, and I will be happy to fix it.
 If you need any new feature, or want to discuss the current implementation/features, consider opening a [discussion](https://github.com/Deadlock-too/howlongtobeat-ts/discussions/) or even propose a change with a [Pull Request](https://github.com/Deadlock-too/howlongtobeat-ts/pulls).
 
 ## License
-This project is licensed under the MIT License - see the <a href="https://github.com/Deadlock-too/howlongtobeat-ts/blob/main/LICENSE" target="_blank">LICENSE</a> file for details.
+
+This project is licensed under the MIT License - see the [LICENSE](https://github.com/Deadlock-too/howlongtobeat-ts/blob/main/LICENSE) file for details.
