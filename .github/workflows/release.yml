@@ -32,10 +32,6 @@ jobs:
       - name: Upgrade npm
         run: npm install -g "npm@^11.5.1"
 
-      # Trusted publishing (OIDC) requires npm >= 11.5.1; Node 22 ships npm 10.
-      - name: Upgrade npm
-        run: npm install -g npm@latest
-
       - name: Install dependencies
         run: npm ci
 
