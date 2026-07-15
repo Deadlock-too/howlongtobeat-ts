@@ -1,0 +1,46 @@
+name: Cleanup successful runs
+
+# Deletes workflow runs whose conclusion was `success` once they are older than
+# 7 days. Failed / cancelled / timed-out runs are kept so they remain available
+# to investigate. Deletion is permanent — GitHub cannot restore deleted runs.
+
+on:
+  schedule:
+    - cron: '30 3 * * *' # daily at 03:30 UTC
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete successful runs older than 7 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cutoff=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          echo "Deleting successful runs created before $cutoff"
+
+          ids=$(gh api --paginate \
+            "repos/${GH_REPO}/actions/runs?status=completed&per_page=100" \
+            --jq ".workflow_runs[] | select(.conclusion == \"success\" and .created_at < \"$cutoff\") | .id")
+
+          if [ -z "$ids" ]; then
+            echo "Nothing to delete."
+            exit 0
+          fi
+
+          count=0
+          for id in $ids; do
+            if gh api -X DELETE "repos/${GH_REPO}/actions/runs/$id"; then
+              echo "Deleted run $id"
+              count=$((count + 1))
+            else
+              echo "Failed to delete run $id" >&2
+            fi
+          done
+          echo "Deleted $count run(s)."
