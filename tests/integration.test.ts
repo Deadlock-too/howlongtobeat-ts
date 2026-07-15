@@ -1,11 +1,16 @@
-import { describe, expect, test } from '@jest/globals'
+import { beforeAll, describe, expect, test } from '@jest/globals'
 import { HowLongToBeatService } from '../src'
+
+let service: HowLongToBeatService
+
+beforeAll(() => {
+  service = new HowLongToBeatService()
+})
 
 // These tests hit the live HowLongToBeat API. They run only via the scheduled
 // CI workflow (`npm run test:integration`), not as part of `npm test`.
 describe('Integration – HowLongToBeatService', () => {
   test('fetches game data from HowLongToBeat', async () => {
-    const service = new HowLongToBeatService()
     const result = await service.search('Elden Ring')
 
     expect(result.success).toBe(true)
@@ -26,7 +31,6 @@ describe('Integration – HowLongToBeatService', () => {
   })
 
   test('returns an empty result set for an unknown game', async () => {
-    const service = new HowLongToBeatService()
     const result = await service.search('ThisGameDoesNotExist')
 
     expect(result.success).toBe(true)
@@ -35,7 +39,6 @@ describe('Integration – HowLongToBeatService', () => {
   })
 
   test('fetches a game directly by id', async () => {
-    const service = new HowLongToBeatService()
     const result = await service.getById(68151)
     expect(result.success).toBe(true)
     if (!result.success) throw new Error(result.error)
