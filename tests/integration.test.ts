@@ -1,5 +1,17 @@
-import { beforeAll, describe, expect, test } from '@jest/globals'
+import { beforeAll, describe, expect, jest, test } from '@jest/globals'
 import { HowLongToBeatService } from '../src'
+
+// These hit the live backend, so they need more headroom than Jest's 5s
+// default: the HTTP client alone allows 60s per attempt plus two retries with
+// backoff, so one slow response would fail the test long before the client
+// would have recovered from it.
+//
+// This has to live here rather than as `testTimeout` in jest.config.ts: in a
+// multi-project config Jest resolves a project-level `testTimeout` (it shows up
+// in `--showConfig`) but does not apply it at runtime, so the 5s default wins
+// silently. Setting it at the top level of the config would work, but would
+// also relax the unit suite.
+jest.setTimeout(30_000)
 
 let service: HowLongToBeatService
 
