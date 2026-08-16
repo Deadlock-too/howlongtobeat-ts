@@ -1,5 +1,22 @@
 import { beforeAll, describe, expect, jest, test } from '@jest/globals'
+import { createServer } from 'node:net'
 import { HowLongToBeatService } from '../src'
+import { classifyError } from '@deadlock-too/scrape-kit'
+
+/** Reserves an ephemeral loopback port and immediately gives it back up. */
+function closedLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      if (address === null || typeof address === 'string') {
+        return reject(new Error('expected a TCP address'))
+      }
+      server.close(() => resolve(address.port))
+    })
+  })
+}
 
 // These hit the live backend, so they need more headroom than Jest's 5s
 // default: the HTTP client alone allows 60s per attempt plus two retries with
@@ -55,5 +72,48 @@ describe('Integration – HowLongToBeatService', () => {
     expect(result.success).toBe(true)
     if (!result.success) throw new Error(result.error)
     expect(result.data?.name).toBe('Elden Ring')
+  })
+})
+
+// The unit suite classifies hand-built doubles of the errors `fetch` throws.
+// These check the doubles are faithful, by classifying the errors the runtime
+// actually produces.
+describe('Integration – failure classification', () => {
+  test('a real refused connection classifies as transport', async () => {
+    // Bind a port, then release it, so the connect is refused for certain.
+    // Hard-coding a "probably closed" port risks either a live listener or one
+    // of the ports undici blocks outright, which is a different failure.
+    const port = await closedLoopbackPort()
+
+    let thrown: unknown
+    try {
+      await fetch(`http://127.0.0.1:${port}/`)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeDefined()
+    expect(classifyError(thrown)).toEqual({ kind: 'transport' })
+  })
+
+  test('a real elapsed deadline classifies as timeout, not as a parse failure', async () => {
+    const impatient = new HowLongToBeatService({ timeout: 1, retries: 0 })
+    const result = await impatient.search('Elden Ring')
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.kind).toBe('timeout')
+    expect(result.error).toBe('The HowLongToBeat request timed out')
+  })
+
+  test('a real caller abort classifies as aborted', async () => {
+    const controller = new AbortController()
+    const promise = service.search('Elden Ring', { signal: controller.signal })
+    controller.abort()
+
+    const result = await promise
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.kind).toBe('aborted')
   })
 })
