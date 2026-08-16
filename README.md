@@ -21,6 +21,7 @@ As also noted by toasttsunami in his implementation, this library was created du
 - Retrieve completion time data for games
 - Fetch a single best match (`searchOne`) or look a game up directly by id (`getById`)
 - Resilient networking: configurable timeouts, retries with backoff, `429` handling, an injectable `fetch` and `AbortSignal` support
+- Failures carry a machine-readable `kind`, so you can tell a HowLongToBeat outage from a change that broke this library
 - Fully typed, with a discriminated-union result type and zero `console` noise
 
 ## Installation
@@ -59,6 +60,49 @@ if (best.success && best.data) {
 // Look a game up directly by its HowLongToBeat id.
 const elden = await hltb.getById(68151)
 ```
+
+### Handling failures
+
+Every failure carries an optional `kind` alongside `error`. Branch on `kind` — `error` is prose for humans and its wording may change between releases.
+
+```typescript
+const results = await hltb.search('The Last of Us')
+if (!results.success) {
+  switch (results.kind) {
+    case 'transport':
+    case 'timeout':
+      // Could not reach HowLongToBeat at all — a retry may well succeed.
+      break
+    case 'http':
+      // HowLongToBeat answered with an error status; `status` is set.
+      // 403 usually means the caller's IP range is blocked, 429 rate-limited.
+      console.error(`HowLongToBeat returned ${results.status}`)
+      break
+    case 'parse':
+      // HowLongToBeat answered, but the response could not be read: the site
+      // has most likely changed shape. Please open an issue on this repo.
+      break
+    case 'aborted':
+      // Your own AbortSignal fired.
+      break
+    case 'input':
+      // The arguments were rejected; no request was made.
+      break
+  }
+}
+```
+
+| `kind`      | What happened                                               | Where the fix lives |
+| ----------- | ----------------------------------------------------------- | ------------------- |
+| `input`     | Arguments rejected before any request was made              | your call site      |
+| `transport` | The round trip never completed — DNS, refused, reset, TLS   | the network         |
+| `timeout`   | The per-request deadline elapsed                            | the network         |
+| `aborted`   | Your `AbortSignal` fired                                    | your call site      |
+| `http`      | HowLongToBeat answered with a non-2xx status (see `status`) | HowLongToBeat       |
+| `parse`     | The response could not be understood                        | this library        |
+| `unknown`   | Could not be attributed to any of the above                 | —                   |
+
+`FailureKind` also includes `'notFound'`, which this library never produces — a search that matches nothing succeeds with an empty array, and `searchOne` / `getById` succeed with `null`.
 
 ### Working with completion times
 
@@ -108,9 +152,14 @@ controller.abort()
 Discriminated unions:
 
 ```typescript
-type SearchResult = { success: true; data: HowLongToBeatEntry[] } | { success: false; error: string }
-type EntryResult = { success: true; data: HowLongToBeatEntry | null } | { success: false; error: string }
+type FailureKind = 'input' | 'transport' | 'timeout' | 'aborted' | 'http' | 'parse' | 'unknown'
+type Failure = { success: false; error: string; kind?: FailureKind; status?: number }
+
+type SearchResult = { success: true; data: HowLongToBeatEntry[] } | Failure
+type EntryResult = { success: true; data: HowLongToBeatEntry | null } | Failure
 ```
+
+`error` is always present. `kind` is always set by this library, and `status` is set whenever `kind` is `'http'`. Both are typed as optional because they come from the shared [`@deadlock-too/scrape-kit`](https://github.com/Deadlock-too/scrape-kit) `Failure`, where they were added without breaking older producers.
 
 ### `SearchModifier`
 

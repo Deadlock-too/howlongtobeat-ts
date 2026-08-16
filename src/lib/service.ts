@@ -1,6 +1,17 @@
 import { parseGamePage, parseJsonResult } from './parser'
 import { EntryResult, SearchResult, SearchModifier } from './types'
-import { BaseScraperService, ScraperOptions, ScraperError, fail, ok } from '@deadlock-too/scrape-kit'
+import {
+  BaseScraperService,
+  HttpError,
+  ScraperError,
+  ScraperOptions,
+  fail,
+  failFrom,
+  ok,
+} from '@deadlock-too/scrape-kit'
+
+/** Names the remote source in generated failure messages. */
+const SUBJECT = 'HowLongToBeat'
 
 export type InitResponse = {
   token: string
@@ -34,18 +45,24 @@ export class HowLongToBeatService extends BaseScraperService {
 
   async search(searchKey: string, options: HltbSearchOptions = {}): Promise<SearchResult> {
     if (!searchKey) {
-      return fail('Search key is empty')
+      return fail('Search key is empty', { kind: 'input' })
+    }
+
+    // Fetching and parsing are caught separately: collapsing them into one
+    // `try` is what made a dead socket report itself as a parse failure.
+    let body: string
+    try {
+      body = await this.sendSearchRequest(searchKey, options)
+    } catch (error) {
+      this.logger.error('HowLongToBeat search request failed:', error)
+      return failFrom(error, SUBJECT)
     }
 
     try {
-      const result = await this.sendSearchRequest(searchKey, options)
-      if (result == null) {
-        return fail('Failed to obtain search results')
-      }
-      return ok(parseJsonResult(result, searchKey, this.minSimilarity))
+      return ok(parseJsonResult(body, searchKey, this.minSimilarity))
     } catch (error) {
-      this.logger.error('Error parsing search results:', error)
-      return fail(error instanceof ScraperError ? error.message : 'Failed to parse search results')
+      this.logger.error('Failed to parse the HowLongToBeat search response:', error)
+      return failFrom(error, SUBJECT, 'parse')
     }
   }
 
@@ -64,25 +81,27 @@ export class HowLongToBeatService extends BaseScraperService {
    */
   async getById(id: number, options: { signal?: AbortSignal } = {}): Promise<EntryResult> {
     if (!id || id <= 0) {
-      return fail('A valid game id is required')
+      return fail('A valid game id is required', { kind: 'input' })
+    }
+
+    let html: string
+    try {
+      html = await this.sendGamePageRequest(id, options.signal)
+    } catch (error) {
+      this.logger.error('HowLongToBeat game page request failed:', error)
+      return failFrom(error, SUBJECT)
     }
 
     try {
-      const html = await this.sendGamePageRequest(id, options.signal)
       return ok(parseGamePage(html, id))
     } catch (error) {
-      this.logger.error('Error fetching game by id:', error)
-      return fail(error instanceof ScraperError ? error.message : 'Failed to fetch the game page')
+      this.logger.error('Failed to parse the HowLongToBeat game page:', error)
+      return failFrom(error, SUBJECT, 'parse')
     }
   }
 
-  private async sendSearchRequest(searchKey: string, options: HltbSearchOptions): Promise<string | undefined> {
+  private async sendSearchRequest(searchKey: string, options: HltbSearchOptions): Promise<string> {
     const authInfo = await this.getAuthInfo(options.signal)
-    if (!authInfo) {
-      this.logger.error('Failed to obtain auth token')
-      return undefined
-    }
-
     const headers = HowLongToBeatService.getSearchRequestHeaders(authInfo)
     const payload = HowLongToBeatService.getSearchRequestData(
       searchKey,
@@ -97,7 +116,7 @@ export class HowLongToBeatService extends BaseScraperService {
       options.signal,
     )
     if (!response.ok) {
-      throw new ScraperError(`Search request failed with status ${response.status}`)
+      throw new HttpError(`Search request failed with status ${response.status}`, response.status)
     }
     return response.text()
   }
@@ -109,29 +128,41 @@ export class HowLongToBeatService extends BaseScraperService {
     }
     const response = await this.http.request(`${HowLongToBeatService.BASE_URL}game/${id}`, { headers }, signal)
     if (!response.ok) {
-      throw new ScraperError(`Game page request failed with status ${response.status}`)
+      throw new HttpError(`Game page request failed with status ${response.status}`, response.status)
     }
     return response.text()
   }
 
-  private async getAuthInfo(signal?: AbortSignal): Promise<InitResponse | null> {
+  /**
+   * Fetches the short-lived credentials the search endpoint requires.
+   *
+   * This throws rather than returning `null`: it is the request most likely to
+   * be the one a caller actually hits (HowLongToBeat blocks datacentre IP
+   * ranges here), and swallowing the reason left a 403, a DNS failure and a
+   * restructured init payload indistinguishable from one another.
+   */
+  private async getAuthInfo(signal?: AbortSignal): Promise<InitResponse> {
     const userAgent = this.http.randomUserAgent()
     const headers = { 'User-Agent': userAgent, Referer: HowLongToBeatService.REFERER_HEADER }
 
-    try {
-      const response = await this.http.request(`${HowLongToBeatService.INIT_URL}?t=${Date.now()}`, { headers }, signal)
-      if (!response.ok) return null
-
-      const json = await response.json()
-      if (json && json.token) {
-        return { ...json, userAgent } as InitResponse
-      }
-      this.logger.error('Auth token not found in JSON response')
-      return null
-    } catch (error) {
-      this.logger.error('Error fetching auth info:', error)
-      return null
+    const response = await this.http.request(`${HowLongToBeatService.INIT_URL}?t=${Date.now()}`, { headers }, signal)
+    if (!response.ok) {
+      throw new HttpError(`Init request failed with status ${response.status}`, response.status)
     }
+
+    let json: { token?: unknown }
+    try {
+      json = (await response.json()) as { token?: unknown }
+    } catch (error) {
+      throw new ScraperError('Failed to parse the HowLongToBeat init response as JSON', error)
+    }
+
+    if (!json || !json.token) {
+      throw new ScraperError(
+        'Unexpected HowLongToBeat init response: no auth token (the site structure may have changed)',
+      )
+    }
+    return { ...json, userAgent } as InitResponse
   }
 
   static getSearchRequestHeaders(authInfo: InitResponse): Record<string, string> {

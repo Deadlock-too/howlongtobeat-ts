@@ -4,7 +4,7 @@ import { HowLongToBeatService, SearchModifier, ScraperError, toHours } from '../
 import { type InitResponse, getMatchScore, getSimilarity } from '../src'
 import { parseGamePage, parseJsonResult } from '../src/lib/parser'
 import { normalize } from '../src/lib/utils'
-import { HttpClient, type FetchLike, clampSimilarity } from '@deadlock-too/scrape-kit'
+import { HttpClient, HttpError, type FetchLike, clampSimilarity } from '@deadlock-too/scrape-kit'
 
 const searchFixture = readFileSync('tests/fixtures/search-response.json', 'utf8')
 const gamePageFixture = readFileSync('tests/fixtures/game-page.html', 'utf8')
@@ -28,6 +28,26 @@ const initRoute = (): Route => ({ match: (u) => u.includes('/init'), respond: ()
 function makeService(routes: Route[]): HowLongToBeatService {
   return new HowLongToBeatService({ fetch: fetchStub(routes), retries: 0 })
 }
+
+/**
+ * Reproduces the shape `fetch` gives a socket failure: a bare
+ * `TypeError: fetch failed` whose `cause` carries the real errno. Building it
+ * by hand keeps the unit suite off the network while still exercising the
+ * chain-walking that a real failure requires.
+ */
+function fetchFailure(code: string): TypeError {
+  const cause = Object.assign(new Error(`connect ${code} 127.0.0.1:1`), { code })
+  return Object.assign(new TypeError('fetch failed'), { cause })
+}
+
+/** A fetch double that never settles until its `init.signal` aborts. */
+const hangingFetch: FetchLike = (_input, init) =>
+  new Promise<Response>((_resolve, reject) => {
+    const signal = init?.signal
+    if (!signal) return
+    if (signal.aborted) return reject(signal.reason)
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+  })
 
 describe('HowLongToBeatService – request building', () => {
   const initResponse = {
@@ -78,7 +98,7 @@ describe('HowLongToBeatService – request building', () => {
 describe('HowLongToBeatService – search', () => {
   test('rejects an empty search key', async () => {
     const result = await new HowLongToBeatService().search('')
-    expect(result).toEqual({ success: false, error: 'Search key is empty' })
+    expect(result).toEqual({ success: false, error: 'Search key is empty', kind: 'input' })
   })
 
   test('returns parsed, similarity-sorted results', async () => {
@@ -97,23 +117,6 @@ describe('HowLongToBeatService – search', () => {
     expect(result.data[0].raw.game_id).toBe(68151)
   })
 
-  test('reports a failure when auth cannot be obtained', async () => {
-    const service = makeService([
-      { match: (u) => u.includes('/init'), respond: () => new Response('', { status: 403 }) },
-    ])
-    const result = await service.search('Elden Ring')
-    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
-  })
-
-  test('surfaces a clear error when the search request fails', async () => {
-    const service = makeService([
-      initRoute(),
-      { match: (u) => u.endsWith('/bleed'), respond: () => new Response('', { status: 404 }) },
-    ])
-    const result = await service.search('Elden Ring')
-    expect(result).toEqual({ success: false, error: 'Search request failed with status 404' })
-  })
-
   test('surfaces a clear error when the response shape changed', async () => {
     const service = makeService([
       initRoute(),
@@ -124,45 +127,266 @@ describe('HowLongToBeatService – search', () => {
     if (result.success) throw new Error('expected failure')
     expect(result.error).toMatch(/structure may have changed/)
   })
+})
 
-  test('reports a failure when the auth response carries no token', async () => {
-    const service = makeService([
-      { match: (u) => u.includes('/init'), respond: () => new Response(JSON.stringify({ hpKey: 'hp', hpVal: 'val' })) },
-    ])
-    const result = await service.search('Elden Ring')
-    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
-  })
-
-  test('reports a failure when the auth response body is not an object', async () => {
-    const service = makeService([{ match: (u) => u.includes('/init'), respond: () => new Response('null') }])
-    const result = await service.search('Elden Ring')
-    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
-  })
-
-  test('reports a failure when the auth request throws', async () => {
-    const service = new HowLongToBeatService({
-      fetch: async (input) => {
-        if (String(input).includes('/init')) throw new Error('network down')
-        return new Response('')
-      },
-      retries: 0,
-    })
-    const result = await service.search('Elden Ring')
-    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
-  })
-
-  test('reports a generic failure when the search request throws a non-ScraperError', async () => {
-    const service = makeService([
-      initRoute(),
-      {
-        match: (u) => u.endsWith('/bleed'),
-        respond: () => {
-          throw new Error('socket hang up')
+/**
+ * The point of these is the `kind`, not the fact of failure. A consumer has to
+ * be able to answer "is HowLongToBeat down, or has it changed shape and broken
+ * this library?" without matching on message wording, so every case below
+ * asserts the discriminator.
+ */
+describe('HowLongToBeatService – failure classification', () => {
+  describe('the source could not be reached', () => {
+    test('a refused connection reports transport, not a parse failure', async () => {
+      const service = new HowLongToBeatService({
+        fetch: async () => {
+          throw fetchFailure('ECONNREFUSED')
         },
-      },
-    ])
-    const result = await service.search('Elden Ring')
-    expect(result).toEqual({ success: false, error: 'Failed to parse search results' })
+        retries: 0,
+      })
+      const result = await service.search('Elden Ring')
+      expect(result).toEqual({
+        success: false,
+        error: 'Could not reach HowLongToBeat (network error)',
+        kind: 'transport',
+      })
+    })
+
+    test('a DNS failure reports transport', async () => {
+      const service = new HowLongToBeatService({
+        fetch: async () => {
+          throw fetchFailure('ENOTFOUND')
+        },
+        retries: 0,
+      })
+      const result = await service.search('Elden Ring')
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected failure')
+      expect(result.kind).toBe('transport')
+    })
+
+    test('a caller abort reports aborted, and blames neither the site nor the parser', async () => {
+      const service = new HowLongToBeatService({ fetch: hangingFetch, retries: 0 })
+      const controller = new AbortController()
+      const promise = service.search('Elden Ring', { signal: controller.signal })
+      queueMicrotask(() => controller.abort())
+
+      const result = await promise
+      expect(result).toEqual({
+        success: false,
+        error: 'The HowLongToBeat request was aborted by the caller',
+        kind: 'aborted',
+      })
+    })
+
+    test("the client's own per-request timeout reports timeout", async () => {
+      const service = new HowLongToBeatService({ fetch: hangingFetch, retries: 0, timeout: 5 })
+      const result = await service.search('Elden Ring')
+      expect(result).toEqual({
+        success: false,
+        error: 'The HowLongToBeat request timed out',
+        kind: 'timeout',
+      })
+    })
+
+    test('getById classifies transport failures the same way', async () => {
+      const service = new HowLongToBeatService({
+        fetch: async () => {
+          throw fetchFailure('ECONNRESET')
+        },
+        retries: 0,
+      })
+      const result = await service.getById(68151)
+      expect(result).toEqual({
+        success: false,
+        error: 'Could not reach HowLongToBeat (network error)',
+        kind: 'transport',
+      })
+    })
+  })
+
+  describe('the source answered with an error status', () => {
+    test('a 403 from the init endpoint carries the status instead of losing it', async () => {
+      const service = makeService([
+        { match: (u) => u.includes('/init'), respond: () => new Response('', { status: 403 }) },
+      ])
+      const result = await service.search('Elden Ring')
+      expect(result).toEqual({
+        success: false,
+        error: 'Init request failed with status 403',
+        kind: 'http',
+        status: 403,
+      })
+    })
+
+    test('a 5xx from the search endpoint carries the status', async () => {
+      const service = makeService([
+        initRoute(),
+        { match: (u) => u.endsWith('/bleed'), respond: () => new Response('', { status: 503 }) },
+      ])
+      const result = await service.search('Elden Ring')
+      expect(result).toEqual({
+        success: false,
+        error: 'Search request failed with status 503',
+        kind: 'http',
+        status: 503,
+      })
+    })
+
+    test('a 404 from the search endpoint carries the status', async () => {
+      const service = makeService([
+        initRoute(),
+        { match: (u) => u.endsWith('/bleed'), respond: () => new Response('', { status: 404 }) },
+      ])
+      const result = await service.search('Elden Ring')
+      expect(result).toEqual({
+        success: false,
+        error: 'Search request failed with status 404',
+        kind: 'http',
+        status: 404,
+      })
+    })
+
+    test('a 5xx on the game page carries the status', async () => {
+      const service = makeService([
+        { match: (u) => u.includes('/game/'), respond: () => new Response('', { status: 500 }) },
+      ])
+      const result = await service.getById(68151)
+      expect(result).toEqual({
+        success: false,
+        error: 'Game page request failed with status 500',
+        kind: 'http',
+        status: 500,
+      })
+    })
+  })
+
+  describe('the source answered, but unreadably', () => {
+    test('a 200 whose search body is not JSON reports parse', async () => {
+      const service = makeService([
+        initRoute(),
+        { match: (u) => u.endsWith('/bleed'), respond: () => new Response('<!doctype html><html lang="en"></html>') },
+      ])
+      const result = await service.search('Elden Ring')
+      expect(result).toEqual({
+        success: false,
+        error: 'Failed to parse the HowLongToBeat response as JSON',
+        kind: 'parse',
+      })
+    })
+
+    test('a 200 whose JSON is missing the data array reports parse', async () => {
+      const service = makeService([
+        initRoute(),
+        { match: (u) => u.endsWith('/bleed'), respond: () => new Response(JSON.stringify({ count: 0 })) },
+      ])
+      const result = await service.search('Elden Ring')
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected failure')
+      expect(result.kind).toBe('parse')
+      expect(result.error).toMatch(/missing "data" array/)
+    })
+
+    test('a 200 whose init body is not JSON reports parse, naming the init response', async () => {
+      const service = makeService([{ match: (u) => u.includes('/init'), respond: () => new Response('<html></html>') }])
+      const result = await service.search('Elden Ring')
+      expect(result).toEqual({
+        success: false,
+        error: 'Failed to parse the HowLongToBeat init response as JSON',
+        kind: 'parse',
+      })
+    })
+
+    test('an init response with no token reports parse, not a network failure', async () => {
+      const service = makeService([
+        {
+          match: (u) => u.includes('/init'),
+          respond: () => new Response(JSON.stringify({ hpKey: 'hp', hpVal: 'val' })),
+        },
+      ])
+      const result = await service.search('Elden Ring')
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected failure')
+      expect(result.kind).toBe('parse')
+      expect(result.error).toMatch(/no auth token/)
+    })
+
+    test('an init body of `null` reports parse', async () => {
+      const service = makeService([{ match: (u) => u.includes('/init'), respond: () => new Response('null') }])
+      const result = await service.search('Elden Ring')
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected failure')
+      expect(result.kind).toBe('parse')
+    })
+
+    // Walking a payload whose shape moved throws a bare TypeError that looks
+    // like nothing in particular. In a parse `catch` it can only be a parse
+    // failure, and reporting it as anything else is what sent people to the
+    // wrong repo.
+    test('a data array holding something unexpected still reports parse', async () => {
+      const service = makeService([
+        initRoute(),
+        { match: (u) => u.endsWith('/bleed'), respond: () => new Response(JSON.stringify({ data: [null] })) },
+      ])
+      const result = await service.search('Elden Ring')
+      expect(result).toEqual({
+        success: false,
+        error: 'Failed to parse the HowLongToBeat response (the site structure may have changed)',
+        kind: 'parse',
+      })
+    })
+
+    test('a game page with no embedded payload reports parse', async () => {
+      const service = makeService([
+        { match: (u) => u.includes('/game/'), respond: () => new Response('<html lang="en"></html>') },
+      ])
+      const result = await service.getById(68151)
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected failure')
+      expect(result.kind).toBe('parse')
+    })
+  })
+
+  describe('everything else', () => {
+    test('an unattributable throw reports unknown rather than guessing', async () => {
+      const service = makeService([
+        initRoute(),
+        {
+          match: (u) => u.endsWith('/bleed'),
+          respond: () => {
+            throw new Error('socket hang up')
+          },
+        },
+      ])
+      const result = await service.search('Elden Ring')
+      expect(result).toEqual({
+        success: false,
+        error: 'The HowLongToBeat request failed for an unknown reason',
+        kind: 'unknown',
+      })
+    })
+
+    test('an invalid game id reports input, without touching the network', async () => {
+      const result = await new HowLongToBeatService().getById(0)
+      expect(result).toEqual({ success: false, error: 'A valid game id is required', kind: 'input' })
+    })
+
+    test('the failure survives a JSON round trip, which a thrown Error would not', async () => {
+      const service = makeService([
+        { match: (u) => u.includes('/init'), respond: () => new Response('', { status: 403 }) },
+      ])
+      const result = await service.search('Elden Ring')
+      expect(JSON.parse(JSON.stringify(result))).toEqual({
+        success: false,
+        error: 'Init request failed with status 403',
+        kind: 'http',
+        status: 403,
+      })
+    })
+  })
+
+  test('the thrown HttpError is still a ScraperError, so existing catches match', () => {
+    expect(new HttpError('boom', 403)).toBeInstanceOf(ScraperError)
   })
 })
 
@@ -178,12 +402,17 @@ describe('HowLongToBeatService – searchOne & getById', () => {
     expect(result.data?.id).toBe(68151)
   })
 
-  test('searchOne propagates a search failure', async () => {
+  test('searchOne propagates a search failure with its discriminator intact', async () => {
     const service = makeService([
       { match: (u) => u.includes('/init'), respond: () => new Response('', { status: 403 }) },
     ])
     const result = await service.searchOne('Elden Ring')
-    expect(result).toEqual({ success: false, error: 'Failed to obtain search results' })
+    expect(result).toEqual({
+      success: false,
+      error: 'Init request failed with status 403',
+      kind: 'http',
+      status: 403,
+    })
   })
 
   test('searchOne returns null when nothing matches', async () => {
@@ -197,7 +426,7 @@ describe('HowLongToBeatService – searchOne & getById', () => {
 
   test('getById validates the id', async () => {
     const result = await new HowLongToBeatService().getById(0)
-    expect(result).toEqual({ success: false, error: 'A valid game id is required' })
+    expect(result).toEqual({ success: false, error: 'A valid game id is required', kind: 'input' })
   })
 
   test('getById parses the embedded game payload', async () => {
@@ -209,23 +438,10 @@ describe('HowLongToBeatService – searchOne & getById', () => {
     expect(result.data?.mainTime).toBe(208800)
   })
 
-  test('getById surfaces a clear error when the game page request fails', async () => {
-    const service = makeService([
-      { match: (u) => u.includes('/game/'), respond: () => new Response('', { status: 500 }) },
-    ])
-    const result = await service.getById(68151)
-    expect(result).toEqual({ success: false, error: 'Game page request failed with status 500' })
-  })
-
-  test('getById reports a generic failure when the request throws', async () => {
-    const service = new HowLongToBeatService({
-      fetch: async () => {
-        throw new Error('network down')
-      },
-      retries: 0,
-    })
-    const result = await service.getById(68151)
-    expect(result).toEqual({ success: false, error: 'Failed to fetch the game page' })
+  test('getById returns null when the page has no matching entry', async () => {
+    const service = makeService([{ match: (u) => u.includes('/game/'), respond: () => new Response(gamePageFixture) }])
+    const result = await service.getById(999999)
+    expect(result).toEqual({ success: true, data: null })
   })
 })
 
