@@ -11,6 +11,15 @@ const gamePageFixture = readFileSync('tests/fixtures/game-page.html', 'utf8')
 
 const AUTH_BODY = JSON.stringify({ token: 'tok', hpKey: 'hp', hpVal: 'val' })
 
+/**
+ * Route matchers derived from the service's own constants, so a change to the
+ * endpoint paths does not have to be mirrored in every route below. The init
+ * URL sits under the search URL, so search matches exactly while init — which
+ * carries a cache-busting query string — matches on prefix.
+ */
+const isSearchUrl = (u: string) => u === HowLongToBeatService.SEARCH_URL
+const isInitUrl = (u: string) => u.startsWith(HowLongToBeatService.INIT_URL)
+
 type Route = { match: (url: string) => boolean; respond: () => Response }
 
 /** Builds a fetch double that routes by URL and never touches the network. */
@@ -23,7 +32,7 @@ function fetchStub(routes: Route[]): FetchLike {
   }
 }
 
-const initRoute = (): Route => ({ match: (u) => u.includes('/init'), respond: () => new Response(AUTH_BODY) })
+const initRoute = (): Route => ({ match: isInitUrl, respond: () => new Response(AUTH_BODY) })
 
 function makeService(routes: Route[]): HowLongToBeatService {
   return new HowLongToBeatService({ fetch: fetchStub(routes), retries: 0 })
@@ -83,7 +92,7 @@ describe('HowLongToBeatService – request building', () => {
     let sentBody: string | undefined
     const service = new HowLongToBeatService({
       fetch: async (input, init) => {
-        if (String(input).includes('/init')) return new Response(AUTH_BODY)
+        if (isInitUrl(String(input))) return new Response(AUTH_BODY)
         sentBody = init?.body as string
         return new Response(searchFixture)
       },
@@ -102,10 +111,7 @@ describe('HowLongToBeatService – search', () => {
   })
 
   test('returns parsed, similarity-sorted results', async () => {
-    const service = makeService([
-      initRoute(),
-      { match: (u) => u.endsWith('/bleed'), respond: () => new Response(searchFixture) },
-    ])
+    const service = makeService([initRoute(), { match: isSearchUrl, respond: () => new Response(searchFixture) }])
     const result = await service.search('Elden Ring')
 
     expect(result.success).toBe(true)
@@ -120,7 +126,7 @@ describe('HowLongToBeatService – search', () => {
   test('surfaces a clear error when the response shape changed', async () => {
     const service = makeService([
       initRoute(),
-      { match: (u) => u.endsWith('/bleed'), respond: () => new Response(JSON.stringify({ nope: true })) },
+      { match: isSearchUrl, respond: () => new Response(JSON.stringify({ nope: true })) },
     ])
     const result = await service.search('Elden Ring')
     expect(result.success).toBe(false)
@@ -207,9 +213,7 @@ describe('HowLongToBeatService – failure classification', () => {
 
   describe('the source answered with an error status', () => {
     test('a 403 from the init endpoint carries the status instead of losing it', async () => {
-      const service = makeService([
-        { match: (u) => u.includes('/init'), respond: () => new Response('', { status: 403 }) },
-      ])
+      const service = makeService([{ match: isInitUrl, respond: () => new Response('', { status: 403 }) }])
       const result = await service.search('Elden Ring')
       expect(result).toEqual({
         success: false,
@@ -222,7 +226,7 @@ describe('HowLongToBeatService – failure classification', () => {
     test('a 5xx from the search endpoint carries the status', async () => {
       const service = makeService([
         initRoute(),
-        { match: (u) => u.endsWith('/bleed'), respond: () => new Response('', { status: 503 }) },
+        { match: isSearchUrl, respond: () => new Response('', { status: 503 }) },
       ])
       const result = await service.search('Elden Ring')
       expect(result).toEqual({
@@ -236,7 +240,7 @@ describe('HowLongToBeatService – failure classification', () => {
     test('a 404 from the search endpoint carries the status', async () => {
       const service = makeService([
         initRoute(),
-        { match: (u) => u.endsWith('/bleed'), respond: () => new Response('', { status: 404 }) },
+        { match: isSearchUrl, respond: () => new Response('', { status: 404 }) },
       ])
       const result = await service.search('Elden Ring')
       expect(result).toEqual({
@@ -265,7 +269,7 @@ describe('HowLongToBeatService – failure classification', () => {
     test('a 200 whose search body is not JSON reports parse', async () => {
       const service = makeService([
         initRoute(),
-        { match: (u) => u.endsWith('/bleed'), respond: () => new Response('<!doctype html><html lang="en"></html>') },
+        { match: isSearchUrl, respond: () => new Response('<!doctype html><html lang="en"></html>') },
       ])
       const result = await service.search('Elden Ring')
       expect(result).toEqual({
@@ -278,7 +282,7 @@ describe('HowLongToBeatService – failure classification', () => {
     test('a 200 whose JSON is missing the data array reports parse', async () => {
       const service = makeService([
         initRoute(),
-        { match: (u) => u.endsWith('/bleed'), respond: () => new Response(JSON.stringify({ count: 0 })) },
+        { match: isSearchUrl, respond: () => new Response(JSON.stringify({ count: 0 })) },
       ])
       const result = await service.search('Elden Ring')
       expect(result.success).toBe(false)
@@ -288,7 +292,7 @@ describe('HowLongToBeatService – failure classification', () => {
     })
 
     test('a 200 whose init body is not JSON reports parse, naming the init response', async () => {
-      const service = makeService([{ match: (u) => u.includes('/init'), respond: () => new Response('<html></html>') }])
+      const service = makeService([{ match: isInitUrl, respond: () => new Response('<html></html>') }])
       const result = await service.search('Elden Ring')
       expect(result).toEqual({
         success: false,
@@ -300,7 +304,7 @@ describe('HowLongToBeatService – failure classification', () => {
     test('an init response with no token reports parse, not a network failure', async () => {
       const service = makeService([
         {
-          match: (u) => u.includes('/init'),
+          match: isInitUrl,
           respond: () => new Response(JSON.stringify({ hpKey: 'hp', hpVal: 'val' })),
         },
       ])
@@ -312,7 +316,7 @@ describe('HowLongToBeatService – failure classification', () => {
     })
 
     test('an init body of `null` reports parse', async () => {
-      const service = makeService([{ match: (u) => u.includes('/init'), respond: () => new Response('null') }])
+      const service = makeService([{ match: isInitUrl, respond: () => new Response('null') }])
       const result = await service.search('Elden Ring')
       expect(result.success).toBe(false)
       if (result.success) throw new Error('expected failure')
@@ -326,7 +330,7 @@ describe('HowLongToBeatService – failure classification', () => {
     test('a data array holding something unexpected still reports parse', async () => {
       const service = makeService([
         initRoute(),
-        { match: (u) => u.endsWith('/bleed'), respond: () => new Response(JSON.stringify({ data: [null] })) },
+        { match: isSearchUrl, respond: () => new Response(JSON.stringify({ data: [null] })) },
       ])
       const result = await service.search('Elden Ring')
       expect(result).toEqual({
@@ -352,7 +356,7 @@ describe('HowLongToBeatService – failure classification', () => {
       const service = makeService([
         initRoute(),
         {
-          match: (u) => u.endsWith('/bleed'),
+          match: isSearchUrl,
           respond: () => {
             throw new Error('socket hang up')
           },
@@ -372,9 +376,7 @@ describe('HowLongToBeatService – failure classification', () => {
     })
 
     test('the failure survives a JSON round trip, which a thrown Error would not', async () => {
-      const service = makeService([
-        { match: (u) => u.includes('/init'), respond: () => new Response('', { status: 403 }) },
-      ])
+      const service = makeService([{ match: isInitUrl, respond: () => new Response('', { status: 403 }) }])
       const result = await service.search('Elden Ring')
       expect(JSON.parse(JSON.stringify(result))).toEqual({
         success: false,
@@ -392,10 +394,7 @@ describe('HowLongToBeatService – failure classification', () => {
 
 describe('HowLongToBeatService – searchOne & getById', () => {
   test('searchOne returns the single best match', async () => {
-    const service = makeService([
-      initRoute(),
-      { match: (u) => u.endsWith('/bleed'), respond: () => new Response(searchFixture) },
-    ])
+    const service = makeService([initRoute(), { match: isSearchUrl, respond: () => new Response(searchFixture) }])
     const result = await service.searchOne('Elden Ring')
     expect(result.success).toBe(true)
     if (!result.success) throw new Error('expected success')
@@ -403,9 +402,7 @@ describe('HowLongToBeatService – searchOne & getById', () => {
   })
 
   test('searchOne propagates a search failure with its discriminator intact', async () => {
-    const service = makeService([
-      { match: (u) => u.includes('/init'), respond: () => new Response('', { status: 403 }) },
-    ])
+    const service = makeService([{ match: isInitUrl, respond: () => new Response('', { status: 403 }) }])
     const result = await service.searchOne('Elden Ring')
     expect(result).toEqual({
       success: false,
@@ -418,7 +415,7 @@ describe('HowLongToBeatService – searchOne & getById', () => {
   test('searchOne returns null when nothing matches', async () => {
     const service = makeService([
       initRoute(),
-      { match: (u) => u.endsWith('/bleed'), respond: () => new Response(JSON.stringify({ data: [] })) },
+      { match: isSearchUrl, respond: () => new Response(JSON.stringify({ data: [] })) },
     ])
     const result = await service.searchOne('Elden Ring')
     expect(result).toEqual({ success: true, data: null })
@@ -449,10 +446,7 @@ describe('HowLongToBeatService – options', () => {
   test('a low similarity threshold widens the result set', async () => {
     const service = new HowLongToBeatService({
       minSimilarity: 0.1,
-      fetch: fetchStub([
-        initRoute(),
-        { match: (u) => u.endsWith('/bleed'), respond: () => new Response(searchFixture) },
-      ]),
+      fetch: fetchStub([initRoute(), { match: isSearchUrl, respond: () => new Response(searchFixture) }]),
       retries: 0,
     })
     const result = await service.search('Elden Ring')
