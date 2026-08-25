@@ -33,10 +33,10 @@ export class HowLongToBeatService extends BaseScraperService {
     return HowLongToBeatService.BASE_URL
   }
   static get SEARCH_URL() {
-    return HowLongToBeatService.BASE_URL + 'api/bleed'
+    return HowLongToBeatService.BASE_URL + 'api/search/site'
   }
   static get INIT_URL() {
-    return HowLongToBeatService.BASE_URL + 'api/bleed/init'
+    return HowLongToBeatService.BASE_URL + 'api/search/site/init'
   }
 
   constructor(options: number | ScraperOptions = {}) {
