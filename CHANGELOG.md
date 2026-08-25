@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.1
+
+### Patch Changes
+
+- [#21](https://github.com/Deadlock-too/howlongtobeat-ts/pull/21) [`693f741`](https://github.com/Deadlock-too/howlongtobeat-ts/commit/693f741dbdb542856b6a0816f54618424575d043) Thanks [@Deadlock-too](https://github.com/Deadlock-too)! - Point the search and init requests at HowLongToBeat's current endpoints
+
+  HowLongToBeat moved its API again: `api/bleed` and `api/bleed/init` no longer serve
+  the search and init payloads, so every `search` and `searchOne` call failed against
+  the live site. They now use `api/search/site` and `api/search/site/init`.
+
+  No public API changes — `HowLongToBeatService.SEARCH_URL` and `INIT_URL` are still
+  the override points if the endpoints move again.
+
+  The unit suite's fetch doubles now derive their route matchers from those two
+  constants instead of hardcoding a path fragment, so the next move only has to be
+  made in one place.
+
 ## 1.3.0
 
 ### Minor Changes
