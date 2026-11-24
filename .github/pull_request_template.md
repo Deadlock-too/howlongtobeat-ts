@@ -1,5 +1,5 @@
-<!-- Index idea <key>: https://index.ppt.fyi/attivita/<key>
-One line per idea this pull request implements; delete it for work with no idea behind it. -->
+<!-- Index task <key>: https://index.ppt.fyi/attivita/<key>
+One line per task this pull request implements; delete it for work with no task behind it. -->
 
 ## What changed
 
